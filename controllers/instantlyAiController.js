@@ -6,8 +6,6 @@ const PAGE_SIZE = 10;
 const API_BASE = "https://api.instantly.ai";
 const LEADS_LIST_PATH = "/api/v2/leads/list";
 const EMAILS_PATH = "/api/v2/emails";
-const testFile = require("../Data/sampleData-100-1.json");
-const campaignFile = require("../Data/campaigns.json");
 const { colorize } = require("../utils/colorLogger");
 
 const {
@@ -20,12 +18,32 @@ const {
 const { extractReply } = require("../services/emailParserService");
 
 const { getIO } = require("../socket");
+const pLimit = require("p-limit").default;
+const redis = require("redis");
+const redisClient = redis.createClient();
+
+// Proper Redis client initialization
+redisClient.on("error", (err) => {
+  console.error("Redis Client Error:", err);
+});
+
+redisClient.on("ready", () => {
+  console.log("Redis client is ready and connected.");
+});
+
+redisClient
+  .connect()
+  .then(() => {
+    console.log("Redis client connected.");
+  })
+  .catch((err) => {
+    console.error("Failed to connect to Redis:", err);
+  });
 
 class instantlyAiController {
   // Global variables accessible from other methods
   totalEncoded = 0;
   totalEnterestedLLM = 0;
-  currentState = "";
 
   // Setter for totalEncoded (overwrites)
   setTotalEncoded(val) {
@@ -34,10 +52,6 @@ class instantlyAiController {
   setTotalEnterestedLLM(val) {
     this.totalEnterestedLLM = val;
   }
-  setCurrentState(val) {
-    this.currentState = val;
-  }
-
   // Increment totalEncoded by a value (additive, does not reset)
   addToTotalEncoded(val) {
     this.totalEncoded += val;
@@ -45,95 +59,8 @@ class instantlyAiController {
   addTotalEnterestedLLM(val) {
     this.totalEnterestedLLM += val;
   }
-  // Simulate progress and emit sample data via socket.io using getIO from socket.js, from 0 to 100 percent
-  simulateSampleProgress() {
-    const io = getIO();
-    if (!io) {
-      console.warn("Socket.io instance not initialized.");
-      return;
-    }
-    // const self = this;
-    // console.log(self.currentState);
-    // console.log("this.currentState");
-    let percent = 0;
-    const maxEmails = 50;
-    const maxPages = 10;
-    // Local simulated values
-    let totalEncoded = 0;
-    let isInterestedLLM = 0;
-    const interval = setInterval(() => {
-  // Log currentState each interval for demonstration
-  // console.log(self.currentState);
-  // Simulate values based on percent
-      const processedLeads = Math.round((percent / 100) * 90); // up to 90
-      const totalEmailsCollected = Math.round((percent / 100) * maxEmails);
-      const pagesFetched = Math.max(1, Math.round((percent / 100) * maxPages));
-      const rowsSoFar = totalEmailsCollected;
-      const distinctLeadsChecked = Math.max(
-        1,
-        Math.round((percent / 100) * 80)
-      );
-      const interestedLeadCount = Math.max(1, Math.round((percent / 100) * 38));
-      const stoppedEarly = percent === 100;
 
-      // Simulate incrementing the values as progress increases
-      if (percent <= 100) {
-        totalEncoded = Math.round((percent / 100) * maxEmails);
-        isInterestedLLM = Math.round((percent / 100) * 38); // or any logic you want
-      }
-
-      const now = new Date();
-      const timeString =
-        now.getHours().toString().padStart(2, "0") +
-        ":" +
-        now.getMinutes().toString().padStart(2, "0") +
-        ":" +
-        now.getSeconds().toString().padStart(2, "0");
-
-      // Emit progress for percent < 100
-      if (percent < 100) {
-        io.emit("progress", {
-          pagesFetched,
-          processedLeads,
-          totalEmailsCollected,
-          rowsSoFar,
-          distinctLeadsChecked,
-          interestedLeadCount,
-          stoppedEarly,
-          maxEmailsCap: maxEmails,
-          maxPagesCap: maxPages,
-          aiInterestThreshold: 0,
-          percentComplete: percent,
-          date: timeString,
-          totalEncoded,
-          isInterestedLLM,
-        });
-      } else if (percent === 100) {
-        // Emit a final event at 100%
-        io.emit("progress", {
-          pagesFetched,
-          processedLeads,
-          totalEmailsCollected,
-          rowsSoFar,
-          distinctLeadsChecked,
-          interestedLeadCount,
-          stoppedEarly,
-          maxEmailsCap: maxEmails,
-          maxPagesCap: maxPages,
-          aiInterestThreshold: 0,
-          percentComplete: percent,
-          date: timeString,
-          totalEncoded,
-          isInterestedLLM,
-        });
-      }
-      percent += 5;
-      if (percent > 100) {
-        clearInterval(interval);
-      }
-    }, 2000); // emits every 900ms
-  }
-  // New: process a single email row, must return a Promise<boolean>
+  // process a single email row, must return a Promise<boolean>
   async processEmailRow({ emailRow, sheetName }) {
     console.log(colorize("Processing lead Email ...", "blue"));
     const spreadsheetId = process.env.SPREADSHEET_ID;
@@ -142,15 +69,12 @@ class instantlyAiController {
 
       // --- Step 1: Address present? ---
       if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip) {
-        const usAddress = await isAddressUsBased(
-          {
-            city: rowJson.city,
-            state: rowJson.state,
-            address: rowJson.address,
-            zip: rowJson.zip,
-          },
-          this.setCurrentState.bind(this)
-        );
+        const usAddress = await isAddressUsBased({
+          city: rowJson.city,
+          state: rowJson.state,
+          address: rowJson.address,
+          zip: rowJson.zip,
+        });
         if (!usAddress) return true; // Skip but still return true
 
         const interested = await isActuallyInterested(
@@ -195,7 +119,7 @@ class instantlyAiController {
   }
 
   getAllCampaigns = async (req, res) => {
-    console.log("Fetching all campaigns from Instantly...")
+    console.log("Fetching all campaigns from Instantly...");
     try {
       const headers = {
         Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
@@ -224,8 +148,7 @@ class instantlyAiController {
         cursor = next_starting_after || null;
       } while (cursor);
 
-
-      console.log("Fetching all campaigns from Instantly -DONE")
+      console.log("Fetching all campaigns from Instantly -DONE");
       responseReturn(res, 200, {
         total: campaigns.length,
         campaigns,
@@ -235,25 +158,12 @@ class instantlyAiController {
       responseReturn(res, 500, { error: "Failed to fetch all campaigns" });
     }
   };
-  // getAllCampaigns = async (req, res) => {
-  //   console.log("Fetching campaigns from local JSON file with delay...");
-  //   try {
-  //     // Simulate delay (e.g., 2 seconds)
-  //     await new Promise((resolve) => setTimeout(resolve, 4000));
-  //     // Return the JSON file contents
-  //     responseReturn(res, 200, campaignFile);
-  //   } catch (err) {
-  //     console.error("Error loading campaigns JSON:", err.message);
-  //     responseReturn(res, 500, {
-  //       error: "Failed to fetch campaigns from JSON",
-  //     });
-  //   }
-  // };
+
   getInterestedRepliesOnly_ = async (req, res) => {
     try {
       const { campaignId, opts = {}, sheetName } = req.body;
       const {
-        pageLimit ,
+        pageLimit,
         emailsPerLead,
         concurrency,
         maxEmails,
@@ -261,16 +171,12 @@ class instantlyAiController {
         aiInterestThreshold,
       } = opts;
 
-
-      console.log(opts)
-      console.log("--- opts ---")
-
       const apiKey = process.env.INSTANTLY_API_KEY;
       if (!apiKey) throw new Error("apiKey is required");
       if (!campaignId) throw new Error("campaignId is required");
 
-      console.log(opts)
-      console.log("opts")
+      const redisKey = `insta:processed_emails:${campaignId}`;
+      const cachedEmails = new Set(await redisClient.sMembers(redisKey));
 
       const authHeaders = {
         Authorization: `Bearer ${apiKey}`,
@@ -362,12 +268,18 @@ class instantlyAiController {
 
       // ---------- API Calls ----------
       const fetchLeadsPage = async (cursor = null) => {
+        const FILTER_LEAD_INTERESTED = {
+          lt_interest_status: 1, // interest status = “interested”
+          email_reply_count: { gt: 0 }, // at least one reply
+          ai_interest_value: { gte: aiInterestThreshold }, // AI score ≥ threshold
+        };
         const body = {
           filters: {
             campaign: campaignId,
             lt_interest_status: 1,
             email_reply_count: { gt: 0 },
             ai_interest_value: { gte: aiInterestThreshold },
+            ...FILTER_LEAD_INTERESTED,
           },
           limit: pageLimit,
           ...(cursor && { starting_after: cursor }),
@@ -379,41 +291,55 @@ class instantlyAiController {
         ).data;
       };
 
-      const fetchRepliesForLeadsBatch = async (leads, perLeadLimit) =>
-        Promise.allSettled(
-          leads.map(async (lead) => {
-            const params = {
-              campaign_id: campaignId,
-              email_type: "received",
-              limit: perLeadLimit,
-              ...(lead?.id
-                ? { lead_id: lead.id }
-                : { lead: lead?.email || lead?.lead }),
-            };
-            try {
-              const r = await axios.get(`${API_BASE}${EMAILS_PATH}`, {
-                headers: authHeaders,
-                params,
-              });
-              return { lead, emails: normalizeLeadsArray(r.data) };
-            } catch (err) {
-              return { lead, emails: [], error: err.message };
-            }
-          })
+      const fetchRepliesForLeadsBatch = async (
+        leads,
+        perLeadLimit,
+        concurrency
+      ) => {
+        const limit = pLimit(concurrency);
+
+        const fetchRepliesForLead = async (lead) => {
+          const params = {
+            campaign_id: campaignId,
+            email_type: "received",
+            sort_order: "desc",
+            i_status: 1,
+            is_unread: true,
+            limit: perLeadLimit,
+            ...(lead?.id
+              ? { lead_id: lead.id }
+              : { lead: lead?.email || lead?.lead }),
+          };
+
+          try {
+            const r = await axios.get(`${API_BASE}${EMAILS_PATH}`, {
+              headers: authHeaders,
+              params,
+            });
+            return { lead, emails: normalizeLeadsArray(r.data) };
+          } catch (err) {
+            return { lead, emails: [], error: err.message };
+          }
+        };
+
+        return await Promise.all(
+          leads.map((lead) => limit(() => fetchRepliesForLead(lead)))
         );
+      };
+
+      const io = getIO();
+      const self = this;
 
       // ---------- State ----------
       const rows = [];
-      const leadIdsAll = new Set();
+      const emailsAll = new Set(cachedEmails);
       const interestedLeadIds = new Set();
       let totalEmailsCollected = 0,
         pagesFetched = 0,
         processedLeads = 0;
       let cursor = null,
         stoppedEarly = false;
-      // Socket.io for progress
-      const io = getIO();
-      const self = this;
+
       function emitProgress() {
         if (!io) return;
         const now = new Date();
@@ -428,7 +354,7 @@ class instantlyAiController {
           processedLeads,
           totalEmailsCollected,
           rowsSoFar: rows.length,
-          distinctLeadsChecked: leadIdsAll.size,
+          distinctLeadsChecked: emailsAll.size,
           interestedLeadCount: interestedLeadIds.size,
           stoppedEarly,
           maxEmailsCap: maxEmails,
@@ -441,7 +367,6 @@ class instantlyAiController {
           date: timeString,
           totalEncoded: self.totalEncoded,
           isInterestedLLM: self.totalEnterestedLLM,
-          setCurrentState: self.setCurrentState,
         });
       }
 
@@ -465,7 +390,29 @@ class instantlyAiController {
         );
 
         for (let i = 0; i < leads.length && !stoppedEarly; i += concurrency) {
-          const batch = leads.slice(i, i + concurrency);
+          // 1️ Filter batch by emailKey
+          const batch = leads.slice(i, i + concurrency).filter((lead) => {
+            // derive the canonical email key
+            const emailKey = lead?.email?.toLowerCase().trim();
+            if (!emailKey) {
+              console.log(
+                `[skip] no valid email for lead: ${JSON.stringify(lead)}`
+              );
+              return false;
+            }
+            if (emailsAll.has(emailKey)) {
+              console.log(`[skip] already processed email: ${emailKey}`);
+              return false;
+            }
+            console.log(`[process] new email to fetch replies: ${emailKey}`);
+            return true;
+          });
+
+          console.log(
+            "Fetched lead emails in batch:",
+            batch.map((l) => l.email)
+          );
+
           const remaining = maxEmails - totalEmailsCollected;
           if (remaining <= 0) {
             stoppedEarly = true;
@@ -475,22 +422,36 @@ class instantlyAiController {
           const perLeadLimit = Math.min(emailsPerLead, remaining);
           const batchResults = await fetchRepliesForLeadsBatch(
             batch,
-            perLeadLimit
+            perLeadLimit,
+            concurrency
           );
 
           for (const r of batchResults) {
             const lead = r.value?.lead || r.lead;
-            const emails = r.value?.emails || r.emails || [];
-            const leadKey =
-              lead?.id || lead?.lead_id || lead?.email || lead?.lead;
-            if (leadKey) leadIdsAll.add(leadKey);
+            const emailKey = lead?.email?.toLowerCase().trim();
+            if (!emailKey) continue;
+
+            // Persist and log add vs duplicate
+            if (!emailsAll.has(emailKey)) {
+              console.log(
+                `[add] persisting email for the first time: ${emailKey}`
+              );
+              emailsAll.add(emailKey);
+              await redisClient.sAdd(redisKey, emailKey);
+            } else {
+              console.log(`[already added] email seen again: ${emailKey}`);
+            }
 
             if (r.error) continue;
 
-            const interestedReplies = emails.filter(isInterestedReply);
+            const interestedReplies = (
+              r.value?.emails ||
+              r.emails ||
+              []
+            ).filter(isInterestedReply);
             if (!interestedReplies.length) continue;
 
-            interestedLeadIds.add(leadKey);
+            interestedLeadIds.add(emailKey);
 
             for (const email of interestedReplies) {
               if (totalEmailsCollected >= maxEmails) {
@@ -498,18 +459,15 @@ class instantlyAiController {
                 break;
               }
 
-              // 👇 FIXED: await mapToSheetRow
               const row = await mapToSheetRow({ lead, email });
-
               if (await this.processEmailRow({ emailRow: row, sheetName })) {
                 rows.push(row);
                 totalEmailsCollected++;
-                emitProgress(); // Emit after every processed row
+                emitProgress();
               }
             }
 
             processedLeads++;
-            // Optionally, keep the log every 25, but progress is now constant
             if (
               processedLeads % 25 === 0 ||
               totalEmailsCollected >= maxEmails
@@ -523,12 +481,13 @@ class instantlyAiController {
 
         if (totalEmailsCollected >= maxEmails) stoppedEarly = true;
         emitProgress();
+
         cursor = getNextCursor(pageResp);
         if (!cursor) break;
       }
 
       console.log(
-        `[interested-only] Done: pages=${pagesFetched}, leads=${leadIdsAll.size}, rows=${rows.length}, stoppedEarly=${stoppedEarly}`
+        `[interested-only] Done: pages=${pagesFetched}, leads=${emailsAll.size}, rows=${rows.length}, stoppedEarly=${stoppedEarly}`
       );
 
       // Final progress emit
@@ -538,7 +497,7 @@ class instantlyAiController {
         total: rows.length,
         rows,
         pagesFetched,
-        distinctLeadsChecked: leadIdsAll.size,
+        distinctLeadsChecked: emailsAll.size,
         interestedLeadCount: interestedLeadIds.size,
         stoppedEarly,
         maxEmailsCap: maxEmails,
@@ -552,53 +511,6 @@ class instantlyAiController {
         detail: err?.message || String(err),
       });
     }
-  };
-
-  // for testing ONLY predefined file(leads email replies)
-  testRun = async (req, res) => {
-    const rows = testFile.rows;
-    const { sheetName } = req.body;
-
-    const results = [];
-
-    for (const row of rows) {
-      try {
-        // const done = await this.processEmailRow(row);
-        const done = await this.processEmailRow({ emailRow: row, sheetName });
-        console.log(this.totalEncoded);
-        console.log("totalEncoded-------------------------------------");
-
-        if (!done) {
-          console.log(this.totalEncoded);
-          console.log("totalEncoded-------------------------------------");
-          console.warn("Skipped row:", row._lead_id);
-          results.push({ leadId: row._lead_id, status: "skipped" });
-          continue;
-        }
-        console.log(this.totalEncoded);
-        console.log("totalEncoded-------------------------------------");
-        console.log("Processed row:", row._lead_id);
-        results.push({ leadId: row._lead_id, status: "processed" });
-      } catch (err) {
-        console.log(this.totalEncoded);
-        console.log("totalEncoded-------------------------------------");
-        console.error("Error processing row:", row._lead_id, err);
-        results.push({
-          leadId: row._lead_id,
-          status: "error",
-          error: err.message,
-        });
-      }
-    }
-
-    console.log("All rows processed sequentially.");
-
-    // Send only once after loop finishes
-    responseReturn(res, 200, {
-      message: "Test run completed",
-      total: rows.length,
-      summary: results,
-    });
   };
 }
 

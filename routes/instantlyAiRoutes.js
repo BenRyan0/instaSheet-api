@@ -7,10 +7,6 @@ router.post('/campaign/get-all-campaigns-replies', instantlyAiController.getInte
 router.post('/agent/start-agent-encoding', instantlyAiController.getInterestedRepliesOnly_)
 
 
-router.get('/insta-sheet/test', instantlyAiController.testRun)
-router.get('/insta-sheet/test-socket', instantlyAiController.simulateSampleProgress)
-
-
 
 
 

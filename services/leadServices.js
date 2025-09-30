@@ -96,13 +96,17 @@ async function isUSByAI(addressText) {
   }
 }
 
-async function isAddressUsBased(
-  { address = "", city = "", state = "", zip = "", country = "" } = {},
-  setCurrentState
-) {
+async function isAddressUsBased({
+  address = "",
+  city = "",
+  state = "",
+  zip = "",
+  country = "",
+} = {}) {
   const fields = { address, city, state, zip, country };
-  console.log(colorize("Analyzing Address if US based ...", "blue"));
-  setCurrentState("Analyzing Address...");
+  console.log(
+    colorize("Analyzing Address if US based - Address ONLY ...", "blue")
+  );
   console.log(fields);
 
   // Make a unified array of all field values
@@ -164,7 +168,7 @@ async function isAddressUsBased(
     return true;
   }
 
-  console.log(colorize("Address not US based", "red"));
+  console.log(colorize("Address not US based - Address ONLY", "red"));
   return false;
 }
 
@@ -201,42 +205,50 @@ async function isWebsiteUsBased(url) {
     throw new Error("Invalid JSON from Python script");
   }
 
-  // ✅ Return only true or false
+  // Return only true or false
   return parsed.isUs === 1;
 }
 
-async function isActuallyInterested(emailReply, addTotalEnterestedLLM) {
-  if (!emailReply || typeof emailReply !== "string") {
-    return false;
-  }
-  console.log(emailReply)
-  console.log("------------------- emailReply -------------------")
-  // 1. Normalize text
-  const text = emailReply.trim().toLowerCase();
-  // 2. Quick rule-based filters
-  const autoReplyPatterns = [
-    /out of office/,
-    /auto-reply/,
-    /thank you for your email/i,
-    /i am currently/i,
-  ];
-  const promoPatterns = [
-    /\bwe (offer|provide)\b/,
-    /\bcheck out our\b/,
-    /visit our website/,
-    /our services include/,
-  ];
-  const interestPatterns = [
-    /\bmore details\b/,
-    /\bhow does\b/,
-    /\blet['’]?s schedule\b/,
-    /\bwhen can you\b/,
-    /\bpricing\b/,
-    /\bi would like\b/,
-    /\bwe need\b/,
-    /\bagree to\b/,
-  ];
+function normalize(email) {
+  return email
+    .replace(/<[^>]+>/g, "")
+    .replace(/(^|\n)>.*(?=\n|$)/g, "")
+    .replace(/-- \r?\n[\s\S]*$/, "")
+    .replace(/\r\n|\r/g, "\n")
+    .trim()
+    .toLowerCase();
+}
 
+// Precompiled filters
+const autoReplyPatterns = [
+  /out of office/,
+  /auto-?reply/,
+  /thank you for (your )?email/,
+  /i am (currently|on).+(holiday|vacation)/,
+];
+
+const promoPatterns = [
+  /\bwe (offer|provide)\b/,
+  /\bcheck out our\b/,
+  /visit our website/,
+  /our services include/,
+];
+
+const interestPatterns = [
+  /\bmore details\b/,
+  /\bhow does\b/,
+  /\blet['’]?s schedule\b/,
+  /\bwhen can you\b/,
+  /\bpricing\b/,
+  /\bi would like\b/,
+  /\bwe need\b/,
+  /\bagree to\b/,
+  /\bwhat services do you provide\??/,
+  /\b(?:yes[:,]?\s*)?interested\b/,
+];
+
+// Local rule-based check
+function ruleBasedCheck(text) {
   if (
     autoReplyPatterns.some((rx) => rx.test(text)) ||
     promoPatterns.some((rx) => rx.test(text)) ||
@@ -244,16 +256,20 @@ async function isActuallyInterested(emailReply, addTotalEnterestedLLM) {
   ) {
     return false;
   }
+  return interestPatterns.some((rx) => rx.test(text));
+}
 
-  if (interestPatterns.some((rx) => rx.test(text))) {
-    return true;
-  }
+async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
+  // 1. Guard & normalize
+  if (!emailReply || typeof emailReply !== "string") return false;
+  const text = normalize(emailReply);
 
-  // 3. LLM fallback with strict prompt
+  // 2. Try the LLM classification
+  const controller = new AbortController();
+  let timeoutId;
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
+    timeoutId = setTimeout(() => controller.abort(), 60000);
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -278,26 +294,32 @@ async function isActuallyInterested(emailReply, addTotalEnterestedLLM) {
         temperature: 0,
       }),
     });
-    clearTimeout(timeout);
 
-    const json = await resp.json();
-    const modelOut = json.choices?.[0]?.message?.content?.trim().toLowerCase();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { choices } = await resp.json();
+    const modelOut = choices?.[0]?.message?.content?.trim().toLowerCase();
 
+    // Trust LLM if it says "true" or "false"
     if (modelOut === "true") {
-      console.log(colorize("LLM classification True", "green"));
-      if (typeof addTotalEnterestedLLM === "function") {
-        addTotalEnterestedLLM(1); // increment by 1
+      if (typeof addTotalInterestedLLM === "function") {
+        addTotalInterestedLLM(1);
       }
-    } else {
-      console.log(colorize("LLM classification False", "red"));
+      return true;
+    }
+    if (modelOut === "false") {
+      return false;
     }
 
-    // console.log("LLM classification:", modelOut);
-    return modelOut === "true";
+    // Unexpected response falls through to fallback
   } catch (err) {
-    console.error("Classification error:", err);
-    return false;
+    console.error("LLM classification error:", err);
+    // proceed to rule-based fallback
+  } finally {
+    clearTimeout(timeoutId);
   }
+
+  // 3. Fallback to local filters
+  return ruleBasedCheck(text);
 }
 
 async function encodeToSheet(

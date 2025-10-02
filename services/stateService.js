@@ -1,14 +1,4 @@
 // services/stateService.js
-
-/**
- * Initialize your crawling state.
- *
- * @param {object} params
- * @param {number} params.initialSeenCount      Size of your Redis “seen” set
- * @param {number} params.maxEmails             Cap on total emails to collect
- * @param {number} params.maxPages              Cap on total pages to fetch
- * @param {number} params.aiInterestThreshold   AI cutoff for interest
- */
 function initState({
   initialSeenCount = 0,
   maxEmails,
@@ -39,6 +29,8 @@ function initState({
     maxPages,
     maxPagesCap: maxPages,
     aiInterestThreshold,
+    totalEncoded : 0,
+    totalInterestedLLM : 0,
 
     /**
      * Call this once per page fetched.

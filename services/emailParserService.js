@@ -3,6 +3,8 @@ require("dotenv").config({ silent: true });
 
 // services/emailParserService.js
 async function extractReply(emailContent) {
+  console.log(emailContent)
+  console.log("emailContent----------------------------------------")
   try {
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",

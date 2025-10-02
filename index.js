@@ -6,28 +6,6 @@ const bodyParser = require("body-parser");
 require("dotenv").config({ silent: true });
 const { init: initSocket } = require("./socket"); 
 
-
-// const redisClient = redis.createClient();
-
-// // Proper Redis client initialization
-// redisClient.on("error", (err) => {
-//   console.error("Redis Client Error:", err);
-// });
-
-// redisClient.on("ready", () => {
-//   console.log("Redis client is ready and connected.");
-// });
-
-// redisClient
-//   .connect()
-//   .then(() => {
-//     // Optionally, you can log here if you want to confirm connection
-//     // console.log('Redis client connected.');
-//   })
-//   .catch((err) => {
-//     console.error("Failed to connect to Redis:", err);
-//   });
-
 const port = process.env.PORT | 3000;
 const server = http.createServer(app);
 app.use(

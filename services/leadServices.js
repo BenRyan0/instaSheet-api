@@ -1,8 +1,8 @@
 require("dotenv").config({ silent: true });
 const axios = require("axios");
-// const { API_BASE,LEADS_LIST_PATH } = require("../config");
-const LEADS_LIST_PATH = "/api/v2/leads/list";
-const API_BASE = "https://api.instantly.ai";
+const { API_BASE,LEADS_LIST_PATH } = require("../config");
+// const LEADS_LIST_PATH = "/api/v2/leads/list";
+// const API_BASE = "https://api.instantly.ai";
 const { colorize } = require("../utils/colorLogger");
 const { patterns } = require("../Filters/addressRegexConfig.json");
 const { spawn } = require("child_process");
@@ -470,102 +470,6 @@ async function encodeToSheet(
   return true;
 }
 
-// async function encodeToSheet(
-//   spreadsheetId,
-//   sheetName,
-//   rowJson,
-//   addToTotalEncoded
-// ) {
-//   const { sheets } = await initGoogleClients();
-
-//   // Step 1: Get sheet list
-//   const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
-//   const existingSheetNames = spreadsheet.data.sheets.map(
-//     (s) => s.properties.title
-//   );
-
-//   // Step 2: If sheet doesn’t exist, create it and add headers
-//   if (!existingSheetNames.includes(sheetName)) {
-//     await sheets.spreadsheets.batchUpdate({
-//       spreadsheetId,
-//       requestBody: {
-//         requests: [{ addSheet: { properties: { title: sheetName } } }],
-//       },
-//     });
-
-//     // Insert headers (keys of rowJson)
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: {
-//         values: [Object.keys(rowJson)],
-//       },
-//     });
-//   }
-
-//   // Step 3: Fetch existing rows
-//   const existing = await sheets.spreadsheets.values.get({
-//     spreadsheetId,
-//     range: sheetName,
-//   });
-
-//   const existingValues = existing.data.values || [];
-//   const headers = existingValues[0] || [];
-
-//   // Find the index of "lead email" and "email reply"
-//   const leadEmailIndex = headers.indexOf("lead email");
-//   const emailReplyIndex = headers.indexOf("email reply");
-
-//   if (leadEmailIndex === -1 || emailReplyIndex === -1) {
-//     throw new Error(
-//       `"lead email" or "email reply" column not found in sheet: ${sheetName}`
-//     );
-//   }
-
-//   // Collect existing lead emails and replies
-//   const existingLeadEmails = new Set(
-//     existingValues
-//       .slice(1)
-//       .map((row) => row[leadEmailIndex]?.toLowerCase().trim())
-//       .filter(Boolean)
-//   );
-//   const existingEmailReplies = new Set(
-//     existingValues
-//       .slice(1)
-//       .map((row) => row[emailReplyIndex]?.toLowerCase().trim())
-//       .filter(Boolean)
-//   );
-
-//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
-//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
-//   // Step 4: Skip if either lead email OR email reply already exists
-//   if (existingLeadEmails.has(newLeadEmail)) {
-//     console.log(
-//       `Lead email "${newLeadEmail}" already exists in ${sheetName}, skipping append.`
-//     );
-//     return false;
-//   }
-
-//   if (existingEmailReplies.has(newEmailReply)) {
-//     console.log(`Email reply already exists in ${sheetName}, skipping append.`);
-//     return false;
-//   }
-
-//   // Step 5: Append new row values (aligned with headers order)
-//   const values = [headers.map((h) => rowJson[h] ?? "")];
-//   await sheets.spreadsheets.values.append({
-//     spreadsheetId,
-//     range: sheetName,
-//     valueInputOption: "RAW",
-//     requestBody: { values },
-//   });
-//   console.log(colorize(`Row appended to ${sheetName}`, "green"));
-//   if (typeof addToTotalEncoded === "function") {
-//     addToTotalEncoded(1); // increment by 1
-//   }
-//   return true;
-// }
 
 module.exports = {
   normalizeRow,

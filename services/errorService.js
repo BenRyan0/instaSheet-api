@@ -2,27 +2,13 @@
 
 const { responseReturn } = require('../utils/response')
 
-/**
- * Custom error type carrying an HTTP status code.
- */
 class HttpError extends Error {
-  /**
-   * @param {number} statusCode  HTTP status code (e.g. 400, 404, 500)
-   * @param {string} message     Error message to send in response
-   */
   constructor(statusCode, message) {
     super(message)
     this.statusCode = statusCode
   }
 }
 
-/**
- * Logs the error and sends a standardized JSON response.
- *
- * @param {Error} err     Thrown error (or HttpError)
- * @param {object} res    Express response object
- * @returns {object}      The return value of responseReturn
- */
 function handleError(err, res) {
   // Determine status
   const status =

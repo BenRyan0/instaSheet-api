@@ -1,8 +1,5 @@
-const EventEmitter = require("events");
-const progressBus = new EventEmitter();
 const { getIO } = require("../socket");
-        
-
+      
 function buildProgressState({
   pagesFetched,
   processedLeads,
@@ -40,9 +37,7 @@ function buildProgressState({
   };
 }
 
-
- const io = getIO();
-
+const io = getIO();
 
 function emitProgress(ctx) {
   const state = buildProgressState(ctx);

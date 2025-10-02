@@ -5,22 +5,24 @@ const redis = require('redis');
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
+
 // Log and handle errors
 redisClient.on('error', (err) => {
   console.error('Redis Client Error:', err);
 });
+
 // Notify when ready
 redisClient.on('ready', () => {
-  console.log('Redis client is ready and connected.');
+  // console.log('Redis client is ready and connected.');
 });
 
 // Connect to Redis
 (async () => {
   try {
     await redisClient.connect();
-    console.log('Redis client connected.');
+    console.log('Redis Connected.');
   } catch (err) {
-    console.error('Failed to connect to Redis:', err);
+    console.error('Radis Connection Failed', err);
   }
 })();
 

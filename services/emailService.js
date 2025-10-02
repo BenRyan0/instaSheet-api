@@ -2,9 +2,9 @@
 
 const axios = require("axios");
 const pLimit = require("p-limit").default;
-// const { API_BASE, EMAILS_PATH } = require("../config");
-const API_BASE= "https://api.instantly.ai"
-const EMAILS_PATH = "/api/v2/emails"
+const { API_BASE, EMAILS_PATH } = require("../config");
+// const API_BASE= "https://api.instantly.ai"
+// const EMAILS_PATH = "/api/v2/emails"
 const { normalizeLeadsArray } = require("../utils/leads");
 
 async function fetchRepliesForLead(
@@ -42,14 +42,12 @@ async function fetchRepliesForLeadsBatch(
 ) {
   // Create a limiter so no more than `concurrency` HTTP calls run at once
   const limit = pLimit(concurrency);
-
   // Wrap each fetch in the limiter
   const tasks = leads.map((lead) =>
     limit(() =>
       fetchRepliesForLead(lead, { campaignId, perLeadLimit, authHeaders })
     )
   );
-
   // Await all fetches; errors are captured per‐lead
   return Promise.all(tasks);
 }

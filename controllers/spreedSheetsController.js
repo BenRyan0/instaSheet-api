@@ -10,7 +10,6 @@ class cardController {
       const response = await sheets.spreadsheets.get({
         spreadsheetId,
       });
-
       // Extract sheet names
       const sheetNames = response.data.sheets.map(
         (sheet) => sheet.properties.title
@@ -22,7 +21,7 @@ class cardController {
       responseReturn(res, 500, { error: "Failed to fetch sheets" });
     }
   };
-
+  
   AddNewSheetAndColumns = async (req, res) => {
     try {
       const { spreadsheetId } = req.params;

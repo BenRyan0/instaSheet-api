@@ -9,15 +9,3 @@ export function normalizeLeadsArray(resp) {
     []
   );
 }
-
-
-// utils/leads.js
-export function getNextCursor(resp) {
-  return (
-    resp?.next_starting_after ||
-    resp?.data?.next_starting_after ||
-    resp?.paging?.next_cursor ||
-    resp?.pagination?.next_starting_after ||
-    null
-  );
-}

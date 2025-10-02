@@ -1,3 +1,4 @@
+require('dotenv').config()
 const { extractReply } = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
@@ -20,7 +21,7 @@ async function mapToSheetRow(lead, email) {
   console.log(colorize("Extracted Email Content", "cyan"), extracted.reply);
 
   return {
-    Agent: process.env.AGENT_NAME || "instaSheet agent",
+    "Column 1": process.env.AGENT_NAME || "instaSheet agent",
     "For scheduling": "",
     "sales person": extracted.salesPerson || "",
     "sales person email": extracted.salesPersonEmail || "",
@@ -30,7 +31,7 @@ async function mapToSheetRow(lead, email) {
     "lead first name": lead?.first_name || "",
     "lead last name": lead?.last_name || "",
     "lead email": leadEmail,
-    "Column 1": leadEmail,
+    "Column 2": leadEmail,
     "email reply": extracted.reply || "",
     "phone 1": lead?.phone || "",
     phone2: payload.phone2 || "",

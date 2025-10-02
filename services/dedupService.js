@@ -1,41 +1,17 @@
 // services/dedupService.js
 
-/**
- * Normalize an email into a canonical key.
- *
- * @param {string} email
- * @returns {string|null}
- */
 function normalizeKey(email) {
   if (!email || typeof email !== 'string') return null
   return email.toLowerCase().trim()
 }
 
-/**
- * Check if a normalized email key is already in Redis.
- *
- * @param {string} emailKey
- * @param {object} redisClient
- * @param {string} redisKey
- * @returns {Promise<boolean>}
- */
+
 async function isProcessed(emailKey, redisClient, redisKey) {
   if (!emailKey) return false
   return await redisClient.sIsMember(redisKey, emailKey)
 }
 
-/**
- * Mark an email key as processed:
- *  - Adds to Redis set
- *  - Adds to in-memory Set
- *  - Logs whether it was new or duplicate
- *
- * @param {string} emailKey           Canonical email key
- * @param {object} redisClient        Redis client instance
- * @param {string} redisKey           Redis set key
- * @param {Set<string>} processedSet  In-memory Set of seen keys
- * @returns {Promise<boolean>}        True if newly added, false if already existed
- */
+
 async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
   console.log(emailKey)
   console.log("emailKey")

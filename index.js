@@ -6,8 +6,25 @@ const bodyParser = require("body-parser");
 require("dotenv").config({ silent: true });
 const { init: initSocket } = require("./socket"); 
 
+// postgre
+const {Client} = require('pg')
+
+const con = new Client({
+  host: "localhost",
+  user: "postgres",
+  port: 5432,
+  password : "root",
+  database : "insta-sheet-db"
+})
+
+
+con.connect().then(()=> console.log("postgre connected"))
 const port = process.env.PORT | 3000;
 const server = http.createServer(app);
+
+
+
+
 app.use(
   cors({
     origin:
@@ -37,6 +54,7 @@ app.use(bodyParser.json());
 app.use("/api", require("./routes/spreedSheetRoutes"));
 app.use("/api", require("./routes/isUsBasedRoutes"));
 app.use("/api", require("./routes/instantlyAiRoutes"));
+app.use("/api", require("./routes/loggerRoutes"));
 
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

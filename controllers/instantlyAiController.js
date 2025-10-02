@@ -30,6 +30,8 @@ const {
 } = require("../services/stateService");
 const { handleError } = require("../services/errorService");
 
+const loggerController = require("./loggerController");
+
 class instantlyAiController {
   // Global variables accessible from other methods
   totalEncoded = 0;
@@ -148,9 +150,9 @@ class instantlyAiController {
       return true; // Ensure main flow continues even on error
     }
   }
-  
+
   getInterestedRepliesOnly_ = async (req, res) => {
-    var i= 0
+    var i = 0;
     try {
       const { campaignId, opts, sheetName } = req.body;
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
@@ -191,10 +193,10 @@ class instantlyAiController {
         });
         for (const { lead, emails } of results) {
           state.nextLead();
-          i++
+          i++;
           emitProgress(state);
 
-          console.log("i", i)
+          console.log("i", i);
           const key = normalizeKey(lead.email);
           const wasNew = await markProcessed(key, redisClient, dedupKey, seen);
           if (!wasNew) continue;
@@ -248,12 +250,18 @@ class instantlyAiController {
         }
       }
       emitProgress(state);
+
+      const summary = summarizeState(state);
+
+      // logs the data into database before sending res to frontend
+      await loggerController.addNewLog(summary);
+
+
       return responseReturn(res, 200, summarizeState(state));
     } catch (err) {
       return handleError(err, res);
     }
   };
-
 }
 
 module.exports = new instantlyAiController();

@@ -36,6 +36,7 @@ class instantlyAiController {
   // Global variables accessible from other methods
   totalEncoded = 0;
   totalEnterestedLLM = 0;
+  errorOccurred = false;
 
   // Setter for totalEncoded (overwrites)
   setTotalEncoded(val) {
@@ -43,6 +44,9 @@ class instantlyAiController {
   }
   setTotalEnterestedLLM(val) {
     this.totalEnterestedLLM = val;
+  }
+  seterrorOccurred(val) {
+    this.errorOccurred = val;
   }
   // Increment totalEncoded by a value (additive, does not reset)
   addToTotalEncoded(val) {
@@ -93,6 +97,11 @@ class instantlyAiController {
       responseReturn(res, 500, { error: "Failed to fetch all campaigns" });
     }
   };
+
+  errorOccurred = false;
+  seterrorOccurred(val) {
+    this.errorOccurred = val;
+  }
 
   async processEmailRow({ emailRow, sheetName }) {
     console.log(colorize("Processing lead Email ...", "blue"));
@@ -170,7 +179,7 @@ class instantlyAiController {
       emitProgress(state);
 
       let cursor = null;
-      while (shouldContinue(state)) {
+      while (shouldContinue(state) && !this.errorOccurred) {
         state.nextPage();
         const page = await fetchLeadsPage({
           campaignId,
@@ -181,8 +190,12 @@ class instantlyAiController {
         });
         const leads = normalizeLeadsArray(page);
         cursor = getNextCursor(page);
+        console.log(cursor);
+        console.log("cursor");
 
         const batch = filterNewLeads(leads, seen);
+        console.log(batch.length);
+        console.log("batch.length");
         if (batch.length === 0) continue;
 
         const results = await fetchRepliesForLeadsBatch(batch, {
@@ -192,6 +205,7 @@ class instantlyAiController {
           authHeaders,
         });
         for (const { lead, emails } of results) {
+          if (this.errorOccurred) break;
           state.nextLead();
           i++;
           emitProgress(state);
@@ -209,6 +223,7 @@ class instantlyAiController {
 
           // —————— process each email, *waiting* for true ——————
           for (const email of interested) {
+            if (this.errorOccurred) break;
             if (state.totalEmailsCollected >= opts.maxEmails) {
               state.stop();
               break;
@@ -256,7 +271,7 @@ class instantlyAiController {
       // logs the data into database before sending res to frontend
       await loggerController.addNewLog(summary);
 
-
+      console.log(colorize("Encoding Run DONE", "blue"));
       return responseReturn(res, 200, summarizeState(state));
     } catch (err) {
       return handleError(err, res);

@@ -14,9 +14,19 @@ function buildProgressState({
   totalEncoded = 0,
   totalInterestedLLM = 0,
 }) {
+ // Avoid divide-by-zero
+  const emailProgress = maxEmailsCap
+    ? (totalEmailsCollected / maxEmailsCap) * 100
+    : 0;
+
+  const pageProgress = maxPagesCap
+    ? (pagesFetched / maxPagesCap) * 100
+    : 0;
+
+  // Blend both metrics equally (50/50 weighting)
   const percentComplete = Math.min(
     100,
-    Math.round((totalEmailsCollected / maxEmailsCap) * 100)
+    Math.round((emailProgress + pageProgress) / 2)
   );
 
   return {
@@ -44,7 +54,8 @@ function emitProgress(ctx) {
   // 1) Broadcast internally via EventEmitter
   io.emit("progress", state);
   // 2) (Optional) Log to console for debugging
-  console.log("[emitProgress]", state);
+  console.log("[ProgressEmitted]");
+  // console.log("[emitProgress]", state);
 }
 
 function onProgress(listener) {

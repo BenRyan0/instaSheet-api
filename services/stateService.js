@@ -7,9 +7,7 @@ function initState({
 
 }) {
 
-  console.log(maxPages)
-  console.log(maxEmails)
-  console.log("Datas")
+
   return {
     // Quantities we’ll mutate
     pagesFetched: 0,

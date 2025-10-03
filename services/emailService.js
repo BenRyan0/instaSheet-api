@@ -11,6 +11,7 @@ async function fetchRepliesForLead(
   lead,
   { campaignId, perLeadLimit, authHeaders }
 ) {
+  console.log("fetchRepliesForLead")
   // Build query parameters
   const params = {
     campaign_id: campaignId,
@@ -27,8 +28,32 @@ async function fetchRepliesForLead(
       headers: authHeaders,
       params,
     });
+    // console.log(response)
+    // console.log("response -fetchRepliesForLead")
     // Normalize array shape if API nests under a key
+
     const emails = normalizeLeadsArray(response.data);
+    // console.log("emails -fetchRepliesForLead START");
+    // emails.forEach((email, i) => {
+    //   console.log(`\n--- EMAIL ${i + 1} ---`);
+    //   console.log("ID:", email.id);
+    //   console.log("Subject:", email.subject);
+
+    //   // Expand the from/to arrays
+    //   console.log("From Address JSON:");
+    //   console.dir(email.from_address_json, { depth: null, colors: true });
+
+    //   console.log("To Address JSON:");
+    //   console.dir(email.to_address_json, { depth: null, colors: true });
+    // });
+
+    // console.log(emails);
+    // emails.from_address_json.forEach((obj, i) => {
+    //   console.log(`From EMAIL DATA ${i}:`);
+    //   console.dir(obj, { depth: null });
+    // });
+
+    // console.log("emails -fetchRepliesForLead END");
     return { lead, emails };
   } catch (err) {
     // Return error per‐lead so batch continues
@@ -40,6 +65,8 @@ async function fetchRepliesForLeadsBatch(
   leads,
   { campaignId, perLeadLimit, concurrency, authHeaders }
 ) {
+
+  console.log("fetchRepliesForLeadsBatch")
   // Create a limiter so no more than `concurrency` HTTP calls run at once
   const limit = pLimit(concurrency);
   // Wrap each fetch in the limiter

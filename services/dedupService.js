@@ -13,8 +13,6 @@ async function isProcessed(emailKey, redisClient, redisKey) {
 
 
 async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
-  console.log(emailKey)
-  console.log("emailKey")
   if (!emailKey) return false
 
   // Already in our local cache?
@@ -39,6 +37,10 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
 }
 
 function filterNewLeads(leads, processed) {
+  console.log("filterNewLeads")
+  console.log(leads)
+  console.log(processed)
+  console.log("filterNewLeads")
   return leads.filter(lead => {
     if (!lead.id) return false;
     // only skip if you’ve fetched replies for this lead before

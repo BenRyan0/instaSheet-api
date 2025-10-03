@@ -1,6 +1,6 @@
 require("dotenv").config({ silent: true });
 const axios = require("axios");
-const { API_BASE,LEADS_LIST_PATH } = require("../config");
+const { API_BASE, LEADS_LIST_PATH } = require("../config");
 // const LEADS_LIST_PATH = "/api/v2/leads/list";
 // const API_BASE = "https://api.instantly.ai";
 const { colorize } = require("../utils/colorLogger");
@@ -25,6 +25,7 @@ async function fetchLeadsPage({
   aiThreshold,
   authHeaders,
 }) {
+  console.log("fetchLeadsPage")
   // Combine base filters with dynamic AI threshold and campaign filter
   const filters = {
     ...FILTER_LEAD_INTERESTED_BASE,
@@ -57,9 +58,11 @@ function getNextCursor(apiResponse) {
 }
 
 async function normalizeRow(emailRow) {
+  console.log(emailRow);
+  console.log("normalizeRow");
   return {
-    Agent: emailRow["Agent"] || "instaSheet agent",
-    "For scheduling": emailRow["For scheduling"] || "",
+    "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
+    "For scheduling": "",
     "sales person": emailRow["sales person"] || "",
     "sales person email": emailRow["sales person email"] || "",
     company: emailRow["company"] || "N/A",
@@ -67,14 +70,15 @@ async function normalizeRow(emailRow) {
       emailRow["company phone#"] ||
       emailRow["phone 1"] ||
       emailRow["phone2"] ||
-      "",
-    "phone#from email": emailRow["phone#from email"] || "",
+      "none",
+    "phone#from email": emailRow["phone#from email"] || "none",
     "lead first name": emailRow["lead first name"] || "",
     "lead last name": emailRow["lead last name"] || "",
     "lead email": emailRow["lead email"] || "",
-    "Column 1": emailRow["Column 1"] || emailRow["lead email"] || "",
+    "Column 2": emailRow["lead email"] || "",
     "email reply": emailRow["email reply"] || "",
     "phone 1": emailRow["phone 1"] || "",
+    "#": emailRow["phone 1"] || "",
     phone2: emailRow.phone2 || "",
     address: emailRow.address || "",
     city: emailRow.city || "",
@@ -87,7 +91,6 @@ async function normalizeRow(emailRow) {
     "status after the call": "",
     "number of calls spoken with the leads ": "",
     "@dropdown": "",
-    "number of calls spoken with the leads ": "",
   };
 }
 
@@ -160,65 +163,71 @@ async function isAddressUsBased({
   const allValues = Object.values(fields).filter(Boolean);
 
   // 1. explicit country mentions
-  if (allValues.some((val) => regexes.countryUsa.test(val))) {
-    console.log(colorize("Country is US based", "green"));
-    return true;
-  }
+  try {
+    if (allValues.some((val) => regexes.countryUsa.test(val))) {
+      console.log(colorize("Country is US based", "green"));
+      return true;
+    }
 
-  // 2. state abbreviations or full names in any field
-  if (
-    allValues.some(
-      (val) =>
-        regexes.stateAbbreviations.test(val) || regexes.fullStateNames.test(val)
-    )
-  ) {
-    console.log(colorize("State is US based", "green"));
-    return true;
-  }
+    // 2. state abbreviations or full names in any field
+    if (
+      allValues.some(
+        (val) =>
+          regexes.stateAbbreviations.test(val) ||
+          regexes.fullStateNames.test(val)
+      )
+    ) {
+      console.log(colorize("State is US based", "green"));
+      return true;
+    }
 
-  // 3. ZIP code in any field
-  if (allValues.some((val) => regexes.zip.test(val))) {
-    console.log(colorize("ZIP is US based", "green"));
-    return true;
-  }
+    // 3. ZIP code in any field
+    if (allValues.some((val) => regexes.zip.test(val))) {
+      console.log(colorize("ZIP is US based", "green"));
+      return true;
+    }
 
-  // 4. well-known US city names in any field
-  if (allValues.some((val) => regexes.usCities.test(val))) {
-    console.log(colorize("City is US based", "green"));
-    return true;
-  }
+    // 4. well-known US city names in any field
+    if (allValues.some((val) => regexes.usCities.test(val))) {
+      console.log(colorize("City is US based", "green"));
+      return true;
+    }
 
-  // 5. city+state combos (like "Boston, MA") in any field
-  if (allValues.some((val) => regexes.cityStateCombo.test(val))) {
-    console.log(colorize("City-State combo is US based", "green"));
-    return true;
-  }
+    // 5. city+state combos (like "Boston, MA") in any field
+    if (allValues.some((val) => regexes.cityStateCombo.test(val))) {
+      console.log(colorize("City-State combo is US based", "green"));
+      return true;
+    }
 
-  // 6. fallback: combine address + city + state
-  const combined = `${address} ${city} ${state}`.trim();
-  if (
-    regexes.stateAbbreviations.test(combined) ||
-    regexes.fullStateNames.test(combined) ||
-    regexes.zip.test(combined)
-  ) {
-    console.log(colorize("Combined address is US based", "green"));
-    return true;
-  }
+    // 6. fallback: combine address + city + state
+    const combined = `${address} ${city} ${state}`.trim();
+    if (
+      regexes.stateAbbreviations.test(combined) ||
+      regexes.fullStateNames.test(combined) ||
+      regexes.zip.test(combined)
+    ) {
+      console.log(colorize("Combined address is US based", "green"));
+      return true;
+    }
 
-  // 7. Last resort → Ask AI model
-  console.log(colorize("Regex inconclusive, asking AI model ...", "yellow"));
-  const aiResult = await isUSByAI(
-    `${address} ${city} ${state} ${zip} ${country}`
-  );
-  if (aiResult) {
-    console.log(colorize("AI confirmed: US based", "green"));
-    return true;
-  }
+    // 7. Last resort → Ask AI model
+    console.log(colorize("Regex inconclusive, asking AI model ...", "yellow"));
+    const aiResult = await isUSByAI(
+      `${address} ${city} ${state} ${zip} ${country}`
+    );
+    if (aiResult) {
+      console.log(colorize("AI confirmed: US based", "green"));
+      return true;
+    }
 
-  console.log(
-    colorize("Address not US based - Address ONLY(regex-LLM)", "red")
-  );
-  return false;
+    console.log(
+      colorize("Address not US based - Address ONLY(regex-LLM)", "red")
+    );
+    return false;
+  } catch (error) {
+    console.log(error);
+    return false;
+  }
 }
 
 async function isWebsiteUsBased(url) {
@@ -327,7 +336,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: "x-ai/grok-4-fast:free",
+        model: "nvidia/nemotron-nano-9b-v2:free",
         messages: [
           {
             role: "system",
@@ -350,6 +359,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
     // Trust LLM if it says "true" or "false"
     if (modelOut === "true") {
+      console.log("LLM classification TRUE")
       if (typeof addTotalInterestedLLM === "function") {
         addTotalInterestedLLM(1);
       }
@@ -370,6 +380,105 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
   // 3. Fallback to local filters
   return ruleBasedCheck(text);
 }
+
+// async function encodeToSheet(
+//   spreadsheetId,
+//   sheetName,
+//   rowJson,
+//   addToTotalEncoded
+// ) {
+//   // initialize Sheets client
+//   const { sheets } = await initGoogleClients();
+
+//   // 1. ensure tab exists & headers are in row 1
+//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
+//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+//   if (!existingTabs.includes(sheetName)) {
+//     // create new sheet tab
+//     await sheets.spreadsheets.batchUpdate({
+//       spreadsheetId,
+//       requestBody: {
+//         requests: [{ addSheet: { properties: { title: sheetName } } }],
+//       },
+//     });
+
+//     // write header row
+//     const headers = Object.keys(rowJson);
+//     await sheets.spreadsheets.values.update({
+//       spreadsheetId,
+//       range: `${sheetName}!A1`,
+//       valueInputOption: "RAW",
+//       requestBody: { values: [headers] },
+//     });
+//   }
+
+//   // 2. read all existing rows
+//   const resp = await sheets.spreadsheets.values.get({
+//     spreadsheetId,
+//     range: sheetName,
+//   });
+//   const allValues = resp.data.values || [];
+//   const headers = allValues[0] || [];
+
+//   // find indices for dedupe columns
+//   const leadIdx = headers.indexOf("lead email");
+//   const replyIdx = headers.indexOf("email reply");
+//   if (leadIdx === -1 || replyIdx === -1) {
+//     throw new Error(
+//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
+//     );
+//   }
+
+//   // build sets of existing data
+//   const existingLeadEmails = new Set();
+//   const existingPairs = new Set();
+//   for (let i = 1; i < allValues.length; i++) {
+//     const row = allValues[i];
+//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
+//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
+//     if (leadEmail) existingLeadEmails.add(leadEmail);
+//     // key is "leadEmail|emailReply"
+//     existingPairs.add(`${leadEmail}|${emailReply}`);
+//   }
+
+//   // normalize incoming values
+//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
+//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
+
+//   // 3a. skip if this lead has already been written
+//   if (existingLeadEmails.has(newLeadEmail)) {
+//     console.log(
+//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
+//     );
+//     return false;
+//   }
+
+//   // 3b. skip only if this exact lead+reply pair exists
+//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
+//   if (existingPairs.has(pairKey)) {
+//     console.log(
+//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+//     );
+//     return false;
+//   }
+
+//   // 4. append new row aligned to headers
+//   const rowValues = headers.map((h) => rowJson[h] ?? "");
+//   await sheets.spreadsheets.values.append({
+//     spreadsheetId,
+//     range: sheetName,
+//     valueInputOption: "RAW",
+//     requestBody: { values: [rowValues] },
+//   });
+//   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
+
+//   // increment your counter
+//   if (typeof addToTotalEncoded === "function") {
+//     addToTotalEncoded(1);
+//   }
+
+//   return true;
+// }
 
 async function encodeToSheet(
   spreadsheetId,
@@ -408,7 +517,19 @@ async function encodeToSheet(
     range: sheetName,
   });
   const allValues = resp.data.values || [];
-  const headers = allValues[0] || [];
+  let headers = allValues[0] || [];
+
+  // if headers are missing or mismatched, overwrite with current rowJson keys
+  const expectedHeaders = Object.keys(rowJson);
+  if (!headers.length || headers.length !== expectedHeaders.length) {
+    headers = expectedHeaders;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [headers] },
+    });
+  }
 
   // find indices for dedupe columns
   const leadIdx = headers.indexOf("lead email");
@@ -427,7 +548,6 @@ async function encodeToSheet(
     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
     if (leadEmail) existingLeadEmails.add(leadEmail);
-    // key is "leadEmail|emailReply"
     existingPairs.add(`${leadEmail}|${emailReply}`);
   }
 
@@ -456,8 +576,9 @@ async function encodeToSheet(
   const rowValues = headers.map((h) => rowJson[h] ?? "");
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: sheetName,
+    range: `${sheetName}!A:A`, // always start at col A
     valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS", // force append at bottom
     requestBody: { values: [rowValues] },
   });
   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
@@ -469,7 +590,6 @@ async function encodeToSheet(
 
   return true;
 }
-
 
 module.exports = {
   normalizeRow,

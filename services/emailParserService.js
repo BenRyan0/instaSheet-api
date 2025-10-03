@@ -1,10 +1,7 @@
 require("dotenv").config({ silent: true });
 
-
 // services/emailParserService.js
 async function extractReply(emailContent) {
-  console.log(emailContent)
-  console.log("emailContent----------------------------------------")
   try {
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -13,7 +10,7 @@ async function extractReply(emailContent) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "x-ai/grok-4-fast:free",
+        model: "nvidia/nemotron-nano-9b-v2:free",
         messages: [
           {
             role: "system",
@@ -21,11 +18,13 @@ async function extractReply(emailContent) {
               "You are an assistant that extracts structured data from email threads.",
               "Given a raw email thread, separate it into five fields:",
               "- reply: only the prospect’s direct response (exclude signatures like 'Sent from my iPhone').",
+              "- senderFirstName: the first name of the respondent who sent the reply.",
+              "- senderLastName: the last name of the respondent who sent the reply.",
               "- original: the original quoted email content.",
               "- salesPerson: the full name of the salesperson who sent the original email.",
               "- salesPersonEmail: the email address of that salesperson.",
               "- signature: the email signature block of the reply (e.g., name, title, company, phone, address, email).",
-              "Always output valid JSON with keys: reply, original, salesPerson, salesPersonEmail, signature.",
+              "Always output valid JSON with keys: reply, original,senderFirstName,senderLastName, salesPerson, salesPersonEmail, signature.",
               "If any field is missing, return it as an empty string.",
             ].join(" "),
           },
@@ -36,19 +35,25 @@ async function extractReply(emailContent) {
     });
 
     const json = await resp.json();
+    console.log(json)
+    console.log("json")
     const modelOut = json.choices?.[0]?.message?.content?.trim();
     console.log("Raw model output:", modelOut);
 
     try {
       return JSON.parse(modelOut);
-    } catch {
+    } catch (parseErr) {
+      console.error("Error parsing model output:", parseErr, "Raw:", modelOut);
       return {
         reply: "",
         original: "",
+        senderFirstName: "",
+        senderLastName: "",
         salesPerson: "",
         salesPersonEmail: "",
         signature: "",
         raw: modelOut,
+        error: parseErr.message,
       };
     }
   } catch (err) {
@@ -56,6 +61,8 @@ async function extractReply(emailContent) {
     return {
       reply: "",
       original: "",
+      senderFirstName: "",
+      senderLastName: "",
       salesPerson: "",
       salesPersonEmail: "",
       signature: "",
@@ -64,7 +71,6 @@ async function extractReply(emailContent) {
   }
 }
 
-
 module.exports = {
- extractReply
+  extractReply,
 };

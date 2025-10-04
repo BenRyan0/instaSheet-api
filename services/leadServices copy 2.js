@@ -339,9 +339,9 @@ async function isActuallyInterested(
   setErrorOccurred,
   useLocal = true
 ) {
-  console.log(emailReply);
-  console.log("emailReply - isActuallyInterested");
 
+  console.log(emailReply)
+  console.log("emailReply -isActuallyInterested")
   // 1. Guard & normalize
   if (!emailReply || typeof emailReply !== "string") return false;
   const text = normalize(emailReply);
@@ -360,13 +360,13 @@ async function isActuallyInterested(
     const headers = useLocal
       ? { "Content-Type": "application/json" }
       : {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
+          Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY }`,
           "Content-Type": "application/json",
         };
 
     const model = useLocal
       ? process.env.LOCAL_LLM
-      : process.env.OPEN_ROUTER_MODEL;
+      : process.env.OPEN_ROUTER_MODEL; // ✅ fixed typo from evn → env
 
     const resp = await fetch(url, {
       method: "POST",
@@ -396,45 +396,45 @@ async function isActuallyInterested(
       throw new Error(`HTTP ${resp.status}`);
     }
 
-    // --- Handle local NDJSON vs OpenRouter JSON ---
-    let modelOut = "";
+    // ✅ Handle raw text to avoid fenced JSON parsing issues
+    let raw = await resp.text();
+    let cleaned = raw.trim();
 
-    if (useLocal) {
-      // NDJSON stream parsing
-      const raw = await resp.text();
-      const lines = raw
-        .split("\n")
-        .map(l => l.trim())
-        .filter(l => l.length > 0);
 
-      let lastValid = null;
-      for (let line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj?.message?.content) {
-            lastValid = obj.message.content.trim();
-            if (lastValid) break; // take the first non-empty response
-          }
-        } catch (e) {
-          console.warn("Skipping bad NDJSON line:", line);
-        }
-      }
+    console.log("resp")
+    console.log(resp)
 
-      modelOut = (lastValid || "").toLowerCase();
-      console.log("Parsed NDJSON modelOut:", modelOut);
-    } else {
-      // OpenRouter JSON
-      const json = await resp.json();
-      console.log("Parsed OpenRouter JSON:", json);
-
-      modelOut =
-        json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-        json.choices?.[0]?.text?.trim()?.toLowerCase() ||
-        "";
-      console.log("Parsed OpenRouter modelOut:", modelOut);
+    // Strip markdown fences if present
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned
+        .replace(/^```[a-zA-Z]*\n/, "")
+        .replace(/```$/, "")
+        .trim();
     }
 
-    // --- Interpret model output ---
+    let json;
+    try {
+      json = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Failed to parse LLM JSON:", e, "\nRaw:", cleaned);
+      if (setErrorOccurred) setErrorOccurred(true);
+      return ruleBasedCheck(text);
+    }
+
+    console.log("Parsed LLM JSON:", json);
+
+    // Different output handling for local vs OpenRouter
+    let modelOut = useLocal
+      ? json.message?.content?.trim()?.toLowerCase() ||
+        json.output?.trim()?.toLowerCase() ||
+        ""
+      : json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
+        json.choices?.[0]?.text?.trim()?.toLowerCase() ||
+        "";
+
+    console.log("LLM raw output string:", modelOut);
+
+    // Normalize and check truthiness
     if (["true", "yes", "interested"].includes(modelOut)) {
       if (typeof addTotalInterestedLLM === "function") {
         addTotalInterestedLLM(1);
@@ -458,7 +458,6 @@ async function isActuallyInterested(
   // 3. Fallback to local filters if LLM fails
   return ruleBasedCheck(text);
 }
-
 
 
 // async function encodeToSheet(

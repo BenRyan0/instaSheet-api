@@ -45,7 +45,7 @@ class instantlyAiController {
   setTotalEnterestedLLM(val) {
     this.totalEnterestedLLM = val;
   }
-  seterrorOccurred(val) {
+  setErrorOccurred(val) {
     this.errorOccurred = val;
   }
   // Increment totalEncoded by a value (additive, does not reset)
@@ -98,11 +98,6 @@ class instantlyAiController {
     }
   };
 
-  errorOccurred = false;
-  seterrorOccurred(val) {
-    this.errorOccurred = val;
-  }
-
   async processEmailRow({ emailRow, sheetName }) {
     console.log(colorize("Processing lead Email ...", "blue"));
     const spreadsheetId = process.env.SPREADSHEET_ID;
@@ -116,12 +111,14 @@ class instantlyAiController {
           state: rowJson.state,
           address: rowJson.address,
           zip: rowJson.zip,
+          setErrorOccurred: this.setErrorOccurred.bind(this),
         });
         if (!usAddress) return true; // Skip but still return true
 
         const interested = await isActuallyInterested(
           rowJson["email reply"],
-          this.addTotalEnterestedLLM.bind(this)
+          this.addTotalEnterestedLLM.bind(this),
+          this.setErrorOccurred.bind(this)
         );
         if (interested) {
           await encodeToSheet(
@@ -140,7 +137,8 @@ class instantlyAiController {
 
         const interested = await isActuallyInterested(
           rowJson["email reply"],
-          this.addTotalEnterestedLLM.bind(this)
+          this.addTotalEnterestedLLM.bind(this),
+          this.setErrorOccurred.bind(this)
         );
         if (interested) {
           await encodeToSheet(
@@ -164,6 +162,7 @@ class instantlyAiController {
     var i = 0;
     try {
       const { campaignId, opts, sheetName } = req.body;
+      console.log(opts);
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
@@ -179,6 +178,8 @@ class instantlyAiController {
       emitProgress(state);
 
       let cursor = null;
+      console.log(this.errorOccurred);
+      console.log("this.errorOccurred");
       while (shouldContinue(state) && !this.errorOccurred) {
         state.nextPage();
         const page = await fetchLeadsPage({
@@ -229,7 +230,12 @@ class instantlyAiController {
               break;
             }
 
-            const row = await mapToSheetRow(lead, email);
+            const row = await mapToSheetRow({
+              lead,
+              email,
+              setErrorOccurred: this.setErrorOccurred.bind(this),
+            });
+            // const row = await mapToSheetRow(lead, email);
 
             // wait until processEmailRow returns true
             let processed = false;
@@ -263,16 +269,26 @@ class instantlyAiController {
 
           if (state.stoppedEarly) break;
         }
+
+        // ✅ Early exit if error flag triggered mid-loop
+        if (this.errorOccurred) {
+          state.stop();
+          state.errorMessage = "Processing aborted due to error.";
+          state.stoppedEarly = true;
+          emitProgress(state);
+
+          const summary = summarizeState(state);
+          await loggerController.addNewLog(summary);
+          return responseReturn(res, 500, summary);
+        }
       }
+
+      // Normal finish
       emitProgress(state);
-
       const summary = summarizeState(state);
-
-      // logs the data into database before sending res to frontend
       await loggerController.addNewLog(summary);
 
-      console.log(colorize("Encoding Run DONE", "blue"));
-      return responseReturn(res, 200, summarizeState(state));
+      return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);
     }

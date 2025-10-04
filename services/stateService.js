@@ -92,7 +92,8 @@ function summarizeState(state) {
     maxEmailsCap: state.maxEmails,
     maxPagesCap: state.maxPages,
     aiInterestThreshold: state.aiInterestThreshold,
-    totalEncoded : state.totalEncoded
+    totalEncoded : state.totalEncoded,
+    errorMessage : state.errorMessage  | ""
   }
 }
 

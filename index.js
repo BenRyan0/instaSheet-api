@@ -7,18 +7,18 @@ require("dotenv").config({ silent: true });
 const { init: initSocket } = require("./socket"); 
 
 // postgre
-const {Client} = require('pg')
+// const {Client} = require('pg')
 
-const con = new Client({
-  host: "localhost",
-  user: "postgres",
-  port: 5432,
-  password : "root",
-  database : "insta-sheet-db"
-})
+// const con = new Client({
+//   host: "localhost",
+//   user: "postgres",
+//   port: 5432,
+//   password : "root",
+//   database : "insta-sheet-db"
+// })
 
 
-con.connect().then(()=> console.log("postgre connected"))
+// con.connect().then(()=> console.log("postgre connected"))
 const port = process.env.PORT | 3000;
 const server = http.createServer(app);
 
@@ -51,6 +51,7 @@ initSocket(server, {
 app.use(bodyParser.json());
 
 // Routes
+app.use("/api", require("./routes/authRoutes"));
 app.use("/api", require("./routes/spreedSheetRoutes"));
 app.use("/api", require("./routes/isUsBasedRoutes"));
 app.use("/api", require("./routes/instantlyAiRoutes"));

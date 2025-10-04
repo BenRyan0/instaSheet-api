@@ -1,49 +1,127 @@
 require("dotenv").config({ silent: true });
 
 // services/emailParserService.js
-async function extractReply(emailContent) {
+async function extractReply({
+  emailContent,
+  setErrorOccurred,
+  useLocal = true,
+}) {
   try {
-    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const url = useLocal
+      ? "http://localhost:11434/api/chat"
+      : "https://openrouter.ai/api/v1/chat/completions";
+
+    const headers = useLocal
+      ? { "Content-Type": "application/json" }
+      : {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+        };
+
+    const model = useLocal
+      ? process.env.LOCAL_LLM
+      : process.env.OPEN_ROUTER_MODEL;
+
+    console.log("extractReply");
+    console.log(headers);
+    console.log(model);
+    console.log("extractReply");
+
+    const resp = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
-        model: "nvidia/nemotron-nano-9b-v2:free",
+        model,
         messages: [
           {
             role: "system",
             content: [
-              "You are an assistant that extracts structured data from email threads.",
-              "Given a raw email thread, separate it into five fields:",
-              "- reply: only the prospect’s direct response (exclude signatures like 'Sent from my iPhone').",
-              "- senderFirstName: the first name of the respondent who sent the reply.",
-              "- senderLastName: the last name of the respondent who sent the reply.",
-              "- original: the original quoted email content.",
-              "- salesPerson: the full name of the salesperson who sent the original email.",
-              "- salesPersonEmail: the email address of that salesperson.",
-              "- signature: the email signature block of the reply (e.g., name, title, company, phone, address, email).",
-              "Always output valid JSON with keys: reply, original,senderFirstName,senderLastName, salesPerson, salesPersonEmail, signature.",
-              "If any field is missing, return it as an empty string.",
-            ].join(" "),
+              // 1. Clear Instructions
+              "You are an expert email parsing and extraction system. Your task is to analyze the provided email thread and extract specific pieces of information. The most crucial part of this task is to return **only a valid JSON object**. It must **not include** any surrounding text, explanations, or **markdown code blocks** (like ```json).",
+
+              // 2. Field Definitions
+              "Extract the following fields from the email thread:",
+              "- **reply**: The most recent, main reply or body of the latest email in the thread, excluding previous quoted emails, signatures, and automatic footers.",
+              "- **senderFirstName**: The first name of the person who wrote the most recent reply.",
+              "- **senderLastName**: The last name of the person who wrote the most recent reply.",
+              "- **original**: The full, complete, raw content of the entire email thread as provided in the input.",
+              "- **salesPerson**: The full name of the internal sales representative or account manager mentioned in the email thread, if any. Use an empty string if not found.",
+              "- **salesPersonEmail**: The email address of the sales representative or account manager mentioned, if any. Use an empty string if not found.",
+              "- **signature**: The full text of the sender's email signature (e.g., name, title, company, phone number).",
+
+              // 3. Output Format and Constraint
+              'If a field\'s value cannot be definitively extracted, its value must be an **empty string (`""`)**, not `null`.',
+
+              // 4. Schema Reinforcement (The output format you MUST use)
+              "Your final output MUST be a valid JSON object matching this structure, and **nothing else**:",
+              `{
+                "reply": "string",
+                "senderFirstName": "string",
+                "senderLastName": "string",
+                "original": "string",
+                "salesPerson": "string",
+                "salesPersonEmail": "string",
+                "signature": "string"
+              }`,
+            ].join("\n"),
           },
           { role: "user", content: emailContent },
         ],
         temperature: 0,
+        stream: false, // 🚨 avoids NDJSON streaming
       }),
     });
 
-    const json = await resp.json();
-    console.log(json)
-    console.log("json")
-    const modelOut = json.choices?.[0]?.message?.content?.trim();
+    const rawText = await resp.text();
+    console.log("Raw response text:", rawText);
+
+    let json;
+    try {
+      json = JSON.parse(rawText);
+    } catch (err) {
+      console.error("Failed to parse API response as JSON:", err.message);
+      if (setErrorOccurred) setErrorOccurred(true);
+      return {
+        reply: "",
+        original: "",
+        senderFirstName: "",
+        senderLastName: "",
+        salesPerson: "",
+        salesPersonEmail: "",
+        signature: "",
+        raw: rawText,
+        error: err.message,
+      };
+    }
+
+    const modelOut = useLocal
+      ? json.message?.content?.trim() || json.output?.trim() || ""
+      : json.choices?.[0]?.message?.content?.trim() ||
+        json.choices?.[0]?.text?.trim() ||
+        "";
+
     console.log("Raw model output:", modelOut);
 
+    let parsed;
     try {
-      return JSON.parse(modelOut);
+      // 🧹 Clean model output
+      let cleaned = modelOut.trim();
+      cleaned = cleaned
+        .replace(/^```(?:json)?/i, "")
+        .replace(/```$/i, "")
+        .trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (jsonMatch) cleaned = jsonMatch[0];
+
+      parsed = JSON.parse(cleaned);
     } catch (parseErr) {
-      console.error("Error parsing model output:", parseErr, "Raw:", modelOut);
+      console.error(
+        "Error parsing model output:",
+        parseErr.message,
+        "Raw:",
+        modelOut
+      );
+      if (setErrorOccurred) setErrorOccurred(true);
       return {
         reply: "",
         original: "",
@@ -56,8 +134,23 @@ async function extractReply(emailContent) {
         error: parseErr.message,
       };
     }
+
+    // ✅ Normalize schema
+    const ensureSchema = (obj) => ({
+      reply: obj.reply || "",
+      original: obj.original || "",
+      senderFirstName: obj.senderFirstName || "",
+      senderLastName: obj.senderLastName || "",
+      salesPerson: obj.salesPerson || "",
+      salesPersonEmail: obj.salesPersonEmail || "",
+      signature: obj.signature || "",
+    });
+
+    if (setErrorOccurred) setErrorOccurred(false);
+    return ensureSchema(parsed);
   } catch (err) {
-    console.error("Error calling OpenRouter:", err);
+    console.error("Error calling LLM:", err);
+    if (setErrorOccurred) setErrorOccurred(true);
     return {
       reply: "",
       original: "",

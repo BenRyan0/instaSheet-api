@@ -149,13 +149,13 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
     if (replyContent === "false") return false;
 
     // 🚨 Unexpected reply → mark error
-    // if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorOccurred) setErrorOccurred(true);
     console.warn("Unexpected AI response, falling back:", replyContent);
 
     return false; // fallback
   } catch (err) {
     console.error("Error classifying with AI:", err);
-    // if (setErrorOccurred) setErrorOccurred(true); // 🚨 Mark error on failure
+    if (setErrorOccurred) setErrorOccurred(true); // 🚨 Mark error on failure
     return false;
   }
 }
@@ -336,12 +336,8 @@ function ruleBasedCheck(text) {
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
-  setErrorOccurred,
-  useLocal = true
+  setErrorOccurred
 ) {
-  console.log(emailReply);
-  console.log("emailReply - isActuallyInterested");
-
   // 1. Guard & normalize
   if (!emailReply || typeof emailReply !== "string") return false;
   const text = normalize(emailReply);
@@ -353,27 +349,15 @@ async function isActuallyInterested(
   try {
     timeoutId = setTimeout(() => controller.abort(), 60000);
 
-    const url = useLocal
-      ? "http://localhost:11434/api/chat"
-      : "https://openrouter.ai/api/v1/chat/completions";
-
-    const headers = useLocal
-      ? { "Content-Type": "application/json" }
-      : {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
-          "Content-Type": "application/json",
-        };
-
-    const model = useLocal
-      ? process.env.LOCAL_LLM
-      : process.env.OPEN_ROUTER_MODEL;
-
-    const resp = await fetch(url, {
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers,
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
       signal: controller.signal,
       body: JSON.stringify({
-        model,
+           model: process.evn.OPEN_ROUTER_MODEL,
         messages: [
           {
             role: "system",
@@ -382,7 +366,7 @@ async function isActuallyInterested(
               "—asking for pricing, next steps, scheduling, or more info.",
               "Ignore promotional pitches and auto-replies.",
               'Answer strictly "true" or "false".',
-            ].join("\n"),
+            ].join(" "),
           },
           { role: "user", content: text },
         ],
@@ -391,66 +375,32 @@ async function isActuallyInterested(
     });
 
     if (!resp.ok) {
-      console.error("LLM ERROR isActuallyInterested:", resp.status);
-      if (setErrorOccurred) setErrorOccurred(true);
+      // if (setErrorOccurred) setErrorOccurred(true); // 🚨 API returned non-200
+      console.log("ERR ASKING OPENROUTER")
       throw new Error(`HTTP ${resp.status}`);
     }
 
-    // --- Handle local NDJSON vs OpenRouter JSON ---
-    let modelOut = "";
+    const { choices } = await resp.json();
+    const modelOut = choices?.[0]?.message?.content?.trim().toLowerCase();
+    console.log("LLM raw output:", modelOut);
 
-    if (useLocal) {
-      // NDJSON stream parsing
-      const raw = await resp.text();
-      const lines = raw
-        .split("\n")
-        .map(l => l.trim())
-        .filter(l => l.length > 0);
-
-      let lastValid = null;
-      for (let line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj?.message?.content) {
-            lastValid = obj.message.content.trim();
-            if (lastValid) break; // take the first non-empty response
-          }
-        } catch (e) {
-          console.warn("Skipping bad NDJSON line:", line);
-        }
-      }
-
-      modelOut = (lastValid || "").toLowerCase();
-      console.log("Parsed NDJSON modelOut:", modelOut);
-    } else {
-      // OpenRouter JSON
-      const json = await resp.json();
-      console.log("Parsed OpenRouter JSON:", json);
-
-      modelOut =
-        json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-        json.choices?.[0]?.text?.trim()?.toLowerCase() ||
-        "";
-      console.log("Parsed OpenRouter modelOut:", modelOut);
-    }
-
-    // --- Interpret model output ---
-    if (["true", "yes", "interested"].includes(modelOut)) {
+    if (modelOut === "true") {
       if (typeof addTotalInterestedLLM === "function") {
         addTotalInterestedLLM(1);
       }
       return true;
     }
 
-    if (["false", "no", "not interested"].includes(modelOut)) {
+    if (modelOut === "false") {
       return false;
     }
 
+    // 🚨 Unexpected output → mark as error
+    // if (setErrorOccurred) setErrorOccurred(true);
     console.warn("LLM gave unexpected output, falling back:", modelOut);
-    if (setErrorOccurred) setErrorOccurred(true);
   } catch (err) {
+    // if (setErrorOccurred) setErrorOccurred(true); // 🚨 Mark error on catch
     console.error("LLM classification error:", err);
-    if (setErrorOccurred) setErrorOccurred(true);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -458,8 +408,6 @@ async function isActuallyInterested(
   // 3. Fallback to local filters if LLM fails
   return ruleBasedCheck(text);
 }
-
-
 
 // async function encodeToSheet(
 //   spreadsheetId,

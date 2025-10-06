@@ -8,8 +8,6 @@ const { responseReturn } = require("../utils/response");
 class authController {
   login = async (req, res) => {
     const { identifier, password } = req.body;
-    // identifier = username or email
-    console.log(req.body)
 
     try {
       // 1. Find user
@@ -106,6 +104,25 @@ class authController {
       res.status(500).json({ error: "Internal server error" });
     }
   };
+
+  logout = async(req, res) =>{
+    try {
+      res.cookie('accessToken', null, {
+        expires: new Date(Date.now()),
+        httpOnly: true
+      })
+
+      responseReturn(res, 200, {
+        message : "Logged out Successfully"
+      })
+    } catch (error) {
+      console.log(error)
+      responseReturn(res, 500, {
+        error: error.message
+      })
+      
+    }
+  }
 }
 
 module.exports = new authController();

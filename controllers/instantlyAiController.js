@@ -158,8 +158,25 @@ class instantlyAiController {
     }
   }
 
+  stopIncodingRun = async(req, res) =>{
+    try {
+      console.log("STOP INCODING RUNS INITIATED")
+      this.setErrorOccurred(true)
+      
+      responseReturn(res, 200, {
+        message: "Encoding Runs Successfuly Stopped"
+      })
+    } catch (error) {
+      console.log(error)
+      responseReturn(res, 500,{
+        message: "Stopping the Encoding runs into error"
+      })      
+    }
+  }
+
   getInterestedRepliesOnly_ = async (req, res) => {
     var i = 0;
+    this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
       console.log(opts);
@@ -212,13 +229,22 @@ class instantlyAiController {
           emitProgress(state);
 
           console.log("i", i);
-          const key = normalizeKey(lead.email);
-          const wasNew = await markProcessed(key, redisClient, dedupKey, seen);
-          if (!wasNew) continue;
+          // Dedup AFTER successful processing instead of before
+          const emailKey = normalizeKey(lead.email || lead.lead);
+          const key = emailKey || lead.id;
 
-          const interested = emails.filter((e) =>
-            isInterestedReply(e, opts.aiInterestThreshold)
-          );
+          let interested = [];
+          try {
+            interested = emails.filter((e) =>
+              isInterestedReply(e, opts.aiInterestThreshold)
+            );
+          } catch (e) {
+            console.warn("Failed filtering interested emails for lead", {
+              leadEmail: lead && (lead.email || lead.lead),
+              error: e && e.message,
+            });
+            interested = [];
+          }
 
           if (!interested.length) continue;
 
@@ -230,11 +256,20 @@ class instantlyAiController {
               break;
             }
 
-            const row = await mapToSheetRow({
-              lead,
-              email,
-              setErrorOccurred: this.setErrorOccurred.bind(this),
-            });
+            let row;
+            try {
+              row = await mapToSheetRow({
+                lead,
+                email,
+                setErrorOccurred: this.setErrorOccurred.bind(this),
+              });
+            } catch (e) {
+              console.warn("mapToSheetRow failed", {
+                leadEmail: lead && (lead.email || lead.lead),
+                error: e && e.message,
+              });
+              continue;
+            }
             // const row = await mapToSheetRow(lead, email);
 
             // wait until processEmailRow returns true
@@ -243,10 +278,18 @@ class instantlyAiController {
             const MAX_RETRIES = 3;
 
             do {
-              processed = await this.processEmailRow({
-                emailRow: row,
-                sheetName,
-              });
+              try {
+                processed = await this.processEmailRow({
+                  emailRow: row,
+                  sheetName,
+                });
+              } catch (e) {
+                console.warn("processEmailRow threw", {
+                  leadEmail: lead && (lead.email || lead.lead),
+                  error: e && e.message,
+                });
+                processed = false;
+              }
               attempts++;
               if (!processed && attempts < MAX_RETRIES) {
                 // optional backoff before retry
@@ -259,6 +302,10 @@ class instantlyAiController {
               state.totalInterestedLLM = this.totalEnterestedLLM;
               state.totalEncoded = this.totalEncoded;
               emitProgress(state);
+              // Mark as processed only after success
+              if (key) {
+                await markProcessed(key, redisClient, dedupKey, seen);
+              }
             } else {
               console.warn(
                 `Failed to process row after ${attempts} attempts:`,
@@ -270,7 +317,7 @@ class instantlyAiController {
           if (state.stoppedEarly) break;
         }
 
-        // ✅ Early exit if error flag triggered mid-loop
+        // Early exit if error flag triggered mid-loop
         if (this.errorOccurred) {
           state.stop();
           state.errorMessage = "Processing aborted due to error.";

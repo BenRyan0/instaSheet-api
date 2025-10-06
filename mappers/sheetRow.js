@@ -10,14 +10,20 @@ console.log("mapToSheetRow")
 console.log("mapToSheetRow")
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
-  const emailBodyText = email?.body?.text || "";
-  const emailBodyHtml = email?.body?.html || "";
+  const emailBodyText = email?.body?.text || payload.text || "";
+
+
+  // If there is no email content, skip extraction entirely
+  if (!emailBodyText || (typeof emailBodyText === "string" && emailBodyText.trim() === "")) {
+    throw new Error("Empty email content; skipping extraction");
+  }
 
     // Use AI-powered extraction
   const extracted = await extractReply({
-    emailContent: emailBodyText || emailBodyHtml || "",
+    emailContent: emailBodyText || "",
     setErrorOccurred,
   });
+  console.log("extracted -LLM")
   console.log(extracted)
 
   // split user_name into firstname/lastname
@@ -32,7 +38,7 @@ console.log("mapToSheetRow")
     lastName = lastName || parts[1] || "";
   }
 
-  // ✅ If still missing, try from from_address_json
+  // If still missing, try from from_address_json
   if (
     (!firstName || !lastName) &&
     Array.isArray(lead?.from_address_json) &&
@@ -95,8 +101,8 @@ console.log("mapToSheetRow")
     company: lead?.company_name || lead?.company || "",
     "company phone#": lead?.phone || "none",
     "phone#from email": phoneFromEmail || "none",
-    "lead first name": extracted.senderFirstName || firstName,
-    "lead last name": extracted.senderLastName || lastName,
+    "lead first name": firstName || extracted.senderFirstName ,
+    "lead last name":  lastName || extracted.senderLastName,
     "lead email": leadEmail,
     "Column 2": leadEmail,
     "email reply": extracted.reply || "",

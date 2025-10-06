@@ -45,8 +45,8 @@ async function fetchLeadsPage({
     headers: authHeaders,
   });
   // Return the raw array of leads
-  console.log(response.data)
-  console.log("response.data")
+  console.log(response.data);
+  console.log("response.data");
   return response.data;
 }
 
@@ -108,7 +108,7 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-           model: process.evn.LOCAL_LLM, // you can swap this with any local Ollama model
+        model: process.evn.LOCAL_LLM, // you can swap this with any local Ollama model
         messages: [
           {
             role: "system",
@@ -134,7 +134,7 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
     });
 
     if (!response.ok) {
-      console.log("ERR ASKING LOCAL LLM")
+      console.log("ERR ASKING LOCAL LLM");
       // if (setErrorOccurred) setErrorOccurred(true); // 🚨 Non-200
       throw new Error(`HTTP ${response.status}`);
     }
@@ -336,14 +336,19 @@ function ruleBasedCheck(text) {
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
-  setErrorOccurred,
-  useLocal = true
+  // setErrorOccurred,
+  useLocal = false
+  // useLocal = process.env.USE_LOCAL
 ) {
   console.log(emailReply);
   console.log("emailReply - isActuallyInterested");
 
   // 1. Guard & normalize
-  if (!emailReply || typeof emailReply !== "string") return false;
+  if (!emailReply || typeof emailReply !== "string") {
+    console.log("asdasd")
+      return false;
+  }
+
   const text = normalize(emailReply);
 
   // 2. Try the LLM classification
@@ -351,7 +356,7 @@ async function isActuallyInterested(
   let timeoutId;
 
   try {
-    timeoutId = setTimeout(() => controller.abort(), 60000);
+    timeoutId = setTimeout(() => controller.abort(), 90000);
 
     const url = useLocal
       ? "http://localhost:11434/api/chat"
@@ -390,10 +395,12 @@ async function isActuallyInterested(
       }),
     });
 
+    console.log(resp)
+    console.log("resp 123")
     if (!resp.ok) {
       console.error("LLM ERROR isActuallyInterested:", resp.status);
-      if (setErrorOccurred) setErrorOccurred(true);
-      throw new Error(`HTTP ${resp.status}`);
+      // if (setErrorOccurred) setErrorOccurred(true);
+      // throw new Error(`HTTP ${resp.status}`);
     }
 
     // --- Handle local NDJSON vs OpenRouter JSON ---
@@ -404,8 +411,8 @@ async function isActuallyInterested(
       const raw = await resp.text();
       const lines = raw
         .split("\n")
-        .map(l => l.trim())
-        .filter(l => l.length > 0);
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
 
       let lastValid = null;
       for (let line of lines) {
@@ -447,10 +454,10 @@ async function isActuallyInterested(
     }
 
     console.warn("LLM gave unexpected output, falling back:", modelOut);
-    if (setErrorOccurred) setErrorOccurred(true);
+    // if (setErrorOccurred) setErrorOccurred(true);
   } catch (err) {
     console.error("LLM classification error:", err);
-    if (setErrorOccurred) setErrorOccurred(true);
+    // if (setErrorOccurred) setErrorOccurred(true);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -458,8 +465,6 @@ async function isActuallyInterested(
   // 3. Fallback to local filters if LLM fails
   return ruleBasedCheck(text);
 }
-
-
 
 // async function encodeToSheet(
 //   spreadsheetId,

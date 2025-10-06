@@ -43,10 +43,11 @@ function filterNewLeads(leads, processed) {
   console.log(processed)
   console.log("filterNewLeads")
   return leads.filter(lead => {
-    if (!lead.id) return false;
-    // only skip if you’ve fetched replies for this lead before
-    if (processed.has(lead.id)) {
-      console.log(`[skip] already fetched replies for leadId=${lead.id}`);
+    // Lead-level dedup should be based on lead.id when available
+    const key = lead.id || null;
+    if (!key) return true;
+    if (processed.has(key)) {
+      console.log(`[skip] already fetched replies for leadId=${key}`);
       return false;
     }
     return true;

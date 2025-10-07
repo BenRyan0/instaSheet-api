@@ -21,7 +21,7 @@ const {
   normalizeKey,
   markProcessed,
 } = require("../services/dedupService");
-const { fetchRepliesForLeadsBatch } = require("../services/emailService");
+const { fetchRepliesForLeadsBatch, fetchRepliesForLead } = require("../services/emailService");
 const { isInterestedReply } = require("../utils/filters");
 const {
   initState,
@@ -217,14 +217,14 @@ class instantlyAiController {
         console.log(batch)
         if (batch.length === 0) continue;
 
-        const results = await fetchRepliesForLeadsBatch(batch, {
-          campaignId,
-          perLeadLimit: opts.emailsPerLead,
-          concurrency: opts.concurrency,
-          authHeaders,
-          delayMs: opts.delayMs,
-        });
-        for (const { lead, emails } of results) {
+        // Sequentially process each lead: wait for replies and email processing before next lead
+        for (const lead of batch) {
+          const { emails } = await fetchRepliesForLead(lead, {
+            campaignId,
+            perLeadLimit: opts.emailsPerLead,
+            authHeaders,
+            delayMs: opts.delayMs,
+          });
           if (this.errorOccurred) break;
           state.nextLead();
           i++;
@@ -258,13 +258,7 @@ class instantlyAiController {
               break;
             }
 
-            // Per-email dedup: skip if this email was already processed
-            const stableEmailId = email && (email.id || email._email_id || email.message_id);
-            const emailProcessKey = stableEmailId ? `email:${stableEmailId}` : null;
-            if (emailProcessKey && seen.has(emailProcessKey)) {
-              console.log(`[skip] already processed email ${emailProcessKey}`);
-              continue;
-            }
+            // Per-email message-id dedup removed; rely solely on lead email/id key
 
             // Skip very long emails (>500 words) and mark as processed to avoid future repeats
             const emailBodyText = (email && email.body && email.body.text) || (lead && lead.payload && lead.payload.text) || "";
@@ -275,9 +269,6 @@ class instantlyAiController {
               console.log(`[skip] email body too long (${wordCount} words), marking processed.`);
               if (key) {
                 await markProcessed(key, redisClient, dedupKey, seen);
-              }
-              if (emailProcessKey) {
-                await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
               }
               continue;
             }
@@ -298,9 +289,6 @@ class instantlyAiController {
               try {
                 if (key) {
                   await markProcessed(key, redisClient, dedupKey, seen);
-                }
-                if (emailProcessKey) {
-                  await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
                 }
               } catch (markErr) {
                 console.warn("Failed to mark as processed after mapToSheetRow error", markErr && markErr.message);
@@ -342,9 +330,6 @@ class instantlyAiController {
               // Mark as processed only after success
               if (key) {
                 await markProcessed(key, redisClient, dedupKey, seen);
-              }
-              if (emailProcessKey) {
-                await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
               }
             } else {
               console.warn(

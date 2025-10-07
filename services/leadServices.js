@@ -60,8 +60,6 @@ function getNextCursor(apiResponse) {
 }
 
 async function normalizeRow(emailRow) {
-  console.log(emailRow);
-  console.log("normalizeRow");
   return {
     "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "",
@@ -172,8 +170,6 @@ async function isAddressUsBased({
   console.log(
     colorize("Analyzing Address if US based - Address ONLY ...", "blue")
   );
-  console.log(fields);
-
   // Make a unified array of all field values
   const allValues = Object.values(fields).filter(Boolean);
 
@@ -338,12 +334,8 @@ async function isActuallyInterested(
   addTotalInterestedLLM,
   useLocal = false
 ) {
-  console.log(emailReply);
-  console.log("emailReply - isActuallyInterested");
-
   // 1. Guard & normalize
   if (!emailReply || typeof emailReply !== "string") {
-    console.log("asdasd");
     return false;
   }
 
@@ -369,7 +361,9 @@ async function isActuallyInterested(
 
     const model = useLocal
       ? process.env.LOCAL_LLM
-      : process.env.OPEN_ROUTER_MODEL;
+      : process.env.OPEN_ROUTER_MODEL2;
+
+      console.log(`model OPENROUTER_API_SEC_KEY : ${model}`)
 
     const resp = await fetch(url, {
       method: "POST",
@@ -381,19 +375,30 @@ async function isActuallyInterested(
           {
             role: "system",
             content: [
-              "You are an assistant that classifies whether a prospect's email reply shows genuine business interest.",
+              "You are an assistant that classifies whether a prospect's email reply shows genuine business interest in the offered service.",
+              "",
+              "SERVICES OFFERED:",
+              "- We provide funding or cash advances based on business gross receipts.",
+              "- Credit history does not affect eligibility.",
+              "- Funding can be released within 24 hours or sooner.",
+              "",
+              "Classify the reply as TRUE or FALSE according to the following:",
+              "",
               "Mark as TRUE if the reply:",
-              "- Expresses curiosity, intent, or engagement (e.g., asking for details, pricing, company info, next steps, or scheduling).",
-              "- Contains open-ended questions or positive signals like 'Yes', 'Sure', 'Sounds good', or 'Tell me more'.",
-              "- Shows willingness to continue the conversation, even if not explicitly saying 'interested'.",
+              "- Expresses curiosity, intent, or engagement about *receiving funding based on business performance*.",
+              "- Asks for details, requirements, terms, next steps, or timing of funding.",
+              "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
+              "- Indicates willingness to discuss your specific funding service.",
+              "- Asking for more details and questions about the offer (e.g. ,Do you fund business acquisitions?)",
               "",
               "Mark as FALSE if the reply:",
-              "- Is clearly disinterested, says 'not interested', 'unsubscribe', or similar.",
-              "- Is generic or neutral (e.g., 'Thanks', 'Got it', 'Received your email').",
-              "- Is an automated or unrelated message.",
+              "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
+              "- Expresses interest in something different from what is offered (e.g., only grants, loans, investments, or donations).",
+              "- Is neutral, generic, or automated (e.g., 'Thanks', 'Received', 'Got it').",
+              "- Contains conditions that exclude your type of offer (e.g., 'only interested in grants' or 'not open to funding').",
               "",
               "Respond with exactly one word — 'true' or 'false' — in lowercase. No punctuation or explanation.",
-            ].join("\n"),
+            ].join("\\n"),
           },
           { role: "user", content: text },
         ],
@@ -401,8 +406,9 @@ async function isActuallyInterested(
       }),
     });
 
+    console.log("RESPONSE IN ISACTUALLYINTERESTED");
     console.log(resp);
-    console.log("resp 123");
+
     if (!resp.ok) {
       console.error("LLM ERROR isActuallyInterested:", resp.status);
       // if (setErrorOccurred) setErrorOccurred(true);
@@ -448,18 +454,107 @@ async function isActuallyInterested(
     }
 
     // --- Interpret model output ---
-    if (["true", "yes", "interested"].includes(modelOut)) {
+    // Handle extra artifacts like "false<|begin_of_sentence|>" by sanitizing
+    const tokenMatch = (modelOut.match(
+      /\b(true|false|yes|no|interested|not interested)\b/i
+    ) || [])[1];
+    const normalizedOut = (tokenMatch || modelOut)
+      .toString()
+      .toLowerCase()
+      .trim();
+
+    if (
+      ["true", "yes", "interested"].includes(normalizedOut) ||
+      modelOut.includes("true")
+    ) {
       if (typeof addTotalInterestedLLM === "function") {
         addTotalInterestedLLM(1);
       }
       return true;
     }
 
-    if (["false", "no", "not interested"].includes(modelOut)) {
+    if (
+      ["false", "no", "not interested"].includes(normalizedOut) ||
+      modelOut.includes("false")
+    ) {
       return false;
     }
 
     console.warn("LLM gave unexpected output, falling back:", modelOut);
+
+    // If OpenRouter response is unclear and we are not using local, attempt a local LLM fallback
+    if (!useLocal) {
+      try {
+        const localController = new AbortController();
+        const localTimeout = setTimeout(() => localController.abort(), 30000);
+
+        const localResp = await fetch("http://localhost:11434/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: localController.signal,
+          body: JSON.stringify({
+            model: process.env.LOCAL_LLM,
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Classify whether the following email reply from a prospect shows genuine interest",
+                  "—asking for pricing, next steps, scheduling, or more info.",
+                  "Ignore promotional pitches and auto-replies.",
+                  'Answer strictly "true" or "false".'
+                ].join("\n"),
+              },
+              { role: "user", content: text },
+            ],
+            temperature: 0,
+            stream: false,
+          }),
+        });
+
+        clearTimeout(localTimeout);
+
+        if (localResp.ok) {
+          // Some local servers return JSON, others NDJSON; try JSON first
+          let localOut = "";
+          try {
+            const localJson = await localResp.json();
+            localOut = (localJson.message?.content || "").toLowerCase().trim();
+          } catch (_) {
+            const raw = await localResp.text();
+            const lines = raw
+              .split("\n")
+              .map((l) => l.trim())
+              .filter((l) => l.length > 0);
+            let lastValid = null;
+            for (let line of lines) {
+              try {
+                const obj = JSON.parse(line);
+                if (obj?.message?.content) {
+                  lastValid = obj.message.content.trim();
+                  if (lastValid) break;
+                }
+              } catch (e) {
+                // ignore bad lines
+              }
+            }
+            localOut = (lastValid || "").toLowerCase();
+          }
+
+          const localToken = (localOut.match(/\b(true|false)\b/i) || [])[1];
+          const localNorm = (localToken || localOut).toString().toLowerCase().trim();
+
+          if (localNorm === "true") {
+            if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
+            return true;
+          }
+          if (localNorm === "false") {
+            return false;
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn("Local fallback failed:", fallbackErr && fallbackErr.message);
+      }
+    }
     // if (setErrorOccurred) setErrorOccurred(true);
   } catch (err) {
     console.error("LLM classification error:", err);
@@ -471,105 +566,6 @@ async function isActuallyInterested(
   // 3. Fallback to local filters if LLM fails
   return ruleBasedCheck(text);
 }
-
-// async function encodeToSheet(
-//   spreadsheetId,
-//   sheetName,
-//   rowJson,
-//   addToTotalEncoded
-// ) {
-//   // initialize Sheets client
-//   const { sheets } = await initGoogleClients();
-
-//   // 1. ensure tab exists & headers are in row 1
-//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
-//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
-//   if (!existingTabs.includes(sheetName)) {
-//     // create new sheet tab
-//     await sheets.spreadsheets.batchUpdate({
-//       spreadsheetId,
-//       requestBody: {
-//         requests: [{ addSheet: { properties: { title: sheetName } } }],
-//       },
-//     });
-
-//     // write header row
-//     const headers = Object.keys(rowJson);
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
-
-//   // 2. read all existing rows
-//   const resp = await sheets.spreadsheets.values.get({
-//     spreadsheetId,
-//     range: sheetName,
-//   });
-//   const allValues = resp.data.values || [];
-//   const headers = allValues[0] || [];
-
-//   // find indices for dedupe columns
-//   const leadIdx = headers.indexOf("lead email");
-//   const replyIdx = headers.indexOf("email reply");
-//   if (leadIdx === -1 || replyIdx === -1) {
-//     throw new Error(
-//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
-//     );
-//   }
-
-//   // build sets of existing data
-//   const existingLeadEmails = new Set();
-//   const existingPairs = new Set();
-//   for (let i = 1; i < allValues.length; i++) {
-//     const row = allValues[i];
-//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
-//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
-//     if (leadEmail) existingLeadEmails.add(leadEmail);
-//     // key is "leadEmail|emailReply"
-//     existingPairs.add(`${leadEmail}|${emailReply}`);
-//   }
-
-//   // normalize incoming values
-//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
-//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
-
-//   // 3a. skip if this lead has already been written
-//   if (existingLeadEmails.has(newLeadEmail)) {
-//     console.log(
-//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-//     );
-//     return false;
-//   }
-
-//   // 3b. skip only if this exact lead+reply pair exists
-//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
-//   if (existingPairs.has(pairKey)) {
-//     console.log(
-//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-//     );
-//     return false;
-//   }
-
-//   // 4. append new row aligned to headers
-//   const rowValues = headers.map((h) => rowJson[h] ?? "");
-//   await sheets.spreadsheets.values.append({
-//     spreadsheetId,
-//     range: sheetName,
-//     valueInputOption: "RAW",
-//     requestBody: { values: [rowValues] },
-//   });
-//   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
-
-//   // increment your counter
-//   if (typeof addToTotalEncoded === "function") {
-//     addToTotalEncoded(1);
-//   }
-
-//   return true;
-// }
 
 async function encodeToSheet(
   spreadsheetId,

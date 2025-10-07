@@ -4,10 +4,6 @@ const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
 
 async function mapToSheetRow({ lead, email, setErrorOccurred }) {
-console.log("mapToSheetRow")
-  console.log(lead)
-  console.log(email)
-console.log("mapToSheetRow")
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const emailBodyText = email?.body?.text || payload.text || "";
@@ -23,6 +19,7 @@ console.log("mapToSheetRow")
     ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
     : 0;
   if (wordCount > 500) {
+    console.log("Email body exceeds 500 words; skipping extraction")
     throw new Error("Email body exceeds 500 words; skipping extraction");
   }
 

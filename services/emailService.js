@@ -26,8 +26,6 @@ async function fetchRepliesForLead(
   lead,
   { campaignId, perLeadLimit, authHeaders, delayMs }
 ) {
-  console.log("fetchRepliesForLead");
-  console.log(lead)
   // Build query parameters
   const params = {
     campaign_id: campaignId,
@@ -58,7 +56,7 @@ async function fetchRepliesForLead(
     // console.log(response.data)
     const emails = normalizeLeadsArray(response.data);
     console.log("fetchRepliesForLead -Emails")
-    console.log(emails)
+    // console.log(emails)
 
     return { lead, emails };
   } catch (err) {

@@ -35,6 +35,7 @@ async function fetchRepliesForLead(
 
     return { lead, emails };
   } catch (err) {
+    console.log(err)
     console.log("[SKIP] fetchRepliesForLead")
     // Return error per‐lead so batch continues
     return { lead, emails: [], error: err.message };

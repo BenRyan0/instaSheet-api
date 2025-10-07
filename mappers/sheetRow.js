@@ -18,6 +18,14 @@ console.log("mapToSheetRow")
     throw new Error("Empty email content; skipping extraction");
   }
 
+  // If email body exceeds 500 words, skip this lead's email without attempting extraction
+  const wordCount = typeof emailBodyText === "string"
+    ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
+    : 0;
+  if (wordCount > 500) {
+    throw new Error("Email body exceeds 500 words; skipping extraction");
+  }
+
     // Use AI-powered extraction
   const extracted = await extractReply({
     emailContent: emailBodyText || "",

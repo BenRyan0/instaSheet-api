@@ -118,7 +118,7 @@ class instantlyAiController {
         const interested = await isActuallyInterested(
           rowJson["email reply"],
           this.addTotalEnterestedLLM.bind(this),
-          this.setErrorOccurred.bind(this)
+          false
         );
         if (interested) {
           await encodeToSheet(
@@ -138,7 +138,7 @@ class instantlyAiController {
         const interested = await isActuallyInterested(
           rowJson["email reply"],
           this.addTotalEnterestedLLM.bind(this),
-          this.setErrorOccurred.bind(this)
+          false
         );
         if (interested) {
           await encodeToSheet(
@@ -256,6 +256,14 @@ class instantlyAiController {
               break;
             }
 
+            // Per-email dedup: skip if this email was already processed
+            const stableEmailId = email && (email.id || email._email_id || email.message_id);
+            const emailProcessKey = stableEmailId ? `email:${stableEmailId}` : null;
+            if (emailProcessKey && seen.has(emailProcessKey)) {
+              console.log(`[skip] already processed email ${emailProcessKey}`);
+              continue;
+            }
+
             let row;
             try {
               row = await mapToSheetRow({
@@ -305,6 +313,9 @@ class instantlyAiController {
               // Mark as processed only after success
               if (key) {
                 await markProcessed(key, redisClient, dedupKey, seen);
+              }
+              if (emailProcessKey) {
+                await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
               }
             } else {
               console.warn(

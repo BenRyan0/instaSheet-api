@@ -37,11 +37,11 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
 }
 
 function filterNewLeads(leads, processed) {
-  console.log("filterNewLeads")
-  console.log(leads)
-  console.log("PROCESSED")
-  console.log(processed)
-  console.log("filterNewLeads")
+  // console.log("filterNewLeads")
+  // console.log(leads)
+  // console.log("PROCESSED")
+  // console.log(processed)
+  // console.log("filterNewLeads")
   return leads.filter(lead => {
     // Lead-level dedup should be based on lead.id when available
     const key = lead.id || null;

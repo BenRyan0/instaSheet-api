@@ -179,7 +179,7 @@ class instantlyAiController {
     this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
-      console.log(opts);
+      // console.log(opts);
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
@@ -195,8 +195,8 @@ class instantlyAiController {
       emitProgress(state);
 
       let cursor = null;
-      console.log(this.errorOccurred);
-      console.log("this.errorOccurred");
+      // console.log(this.errorOccurred);
+      // console.log("this.errorOccurred");
       while (shouldContinue(state) && !this.errorOccurred) {
         state.nextPage();
         const page = await fetchLeadsPage({
@@ -208,12 +208,13 @@ class instantlyAiController {
         });
         const leads = normalizeLeadsArray(page);
         cursor = getNextCursor(page);
-        console.log(cursor);
-        console.log("cursor");
+        // console.log(cursor);
+        // console.log("cursor");
 
         const batch = filterNewLeads(leads, seen);
-        console.log(batch.length);
-        console.log("batch.length");
+        // console.log(batch.length);
+        // console.log("batch.length");
+        console.log(batch)
         if (batch.length === 0) continue;
 
         const results = await fetchRepliesForLeadsBatch(batch, {
@@ -221,6 +222,7 @@ class instantlyAiController {
           perLeadLimit: opts.emailsPerLead,
           concurrency: opts.concurrency,
           authHeaders,
+          delayMs: opts.delayMs,
         });
         for (const { lead, emails } of results) {
           if (this.errorOccurred) break;
@@ -264,6 +266,22 @@ class instantlyAiController {
               continue;
             }
 
+            // Skip very long emails (>500 words) and mark as processed to avoid future repeats
+            const emailBodyText = (email && email.body && email.body.text) || (lead && lead.payload && lead.payload.text) || "";
+            const wordCount = typeof emailBodyText === "string"
+              ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
+              : 0;
+            if (wordCount > 500) {
+              console.log(`[skip] email body too long (${wordCount} words), marking processed.`);
+              if (key) {
+                await markProcessed(key, redisClient, dedupKey, seen);
+              }
+              if (emailProcessKey) {
+                await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
+              }
+              continue;
+            }
+
             let row;
             try {
               row = await mapToSheetRow({
@@ -276,6 +294,17 @@ class instantlyAiController {
                 leadEmail: lead && (lead.email || lead.lead),
                 error: e && e.message,
               });
+              // Mark as processed so we do not retry this lead/email again
+              try {
+                if (key) {
+                  await markProcessed(key, redisClient, dedupKey, seen);
+                }
+                if (emailProcessKey) {
+                  await markProcessed(emailProcessKey, redisClient, dedupKey, seen);
+                }
+              } catch (markErr) {
+                console.warn("Failed to mark as processed after mapToSheetRow error", markErr && markErr.message);
+              }
               continue;
             }
             // const row = await mapToSheetRow(lead, email);

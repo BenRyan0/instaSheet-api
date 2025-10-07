@@ -45,8 +45,8 @@ async function fetchLeadsPage({
     headers: authHeaders,
   });
   // Return the raw array of leads
-  console.log(response.data);
-  console.log("response.data");
+  // console.log(response.data);
+  // console.log("response.data");
   return response.data;
 }
 
@@ -336,17 +336,15 @@ function ruleBasedCheck(text) {
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
-  // setErrorOccurred,
   useLocal = false
-  // useLocal = process.env.USE_LOCAL
 ) {
   console.log(emailReply);
   console.log("emailReply - isActuallyInterested");
 
   // 1. Guard & normalize
   if (!emailReply || typeof emailReply !== "string") {
-    console.log("asdasd")
-      return false;
+    console.log("asdasd");
+    return false;
   }
 
   const text = normalize(emailReply);
@@ -383,10 +381,18 @@ async function isActuallyInterested(
           {
             role: "system",
             content: [
-              "Classify whether the following email reply from a prospect shows genuine interest",
-              "—asking for pricing, next steps, scheduling, or more info.",
-              "Ignore promotional pitches and auto-replies.",
-              'Answer strictly "true" or "false".',
+              "You are an assistant that classifies whether a prospect's email reply shows genuine business interest.",
+              "Mark as TRUE if the reply:",
+              "- Expresses curiosity, intent, or engagement (e.g., asking for details, pricing, company info, next steps, or scheduling).",
+              "- Contains open-ended questions or positive signals like 'Yes', 'Sure', 'Sounds good', or 'Tell me more'.",
+              "- Shows willingness to continue the conversation, even if not explicitly saying 'interested'.",
+              "",
+              "Mark as FALSE if the reply:",
+              "- Is clearly disinterested, says 'not interested', 'unsubscribe', or similar.",
+              "- Is generic or neutral (e.g., 'Thanks', 'Got it', 'Received your email').",
+              "- Is an automated or unrelated message.",
+              "",
+              "Respond with exactly one word — 'true' or 'false' — in lowercase. No punctuation or explanation.",
             ].join("\n"),
           },
           { role: "user", content: text },
@@ -395,8 +401,8 @@ async function isActuallyInterested(
       }),
     });
 
-    console.log(resp)
-    console.log("resp 123")
+    console.log(resp);
+    console.log("resp 123");
     if (!resp.ok) {
       console.error("LLM ERROR isActuallyInterested:", resp.status);
       // if (setErrorOccurred) setErrorOccurred(true);

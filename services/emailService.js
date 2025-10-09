@@ -50,10 +50,14 @@ async function fetchRepliesForLead(
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
 
     // Fetch replies from Instantly API
-    const response = await axios.get("https://api.instantly.ai/api/v2/emails", {
+    const response = await axios.get(`https://api.instantly.ai/api/v2/emails?lead=${lead.email}&email_type=received&sort_order=desc&limit=${perLeadLimit}`, {
       headers: authHeaders,
-      params,
+      // params,
     });
+    // const response = await axios.get("https://api.instantly.ai/api/v2/emails", {
+    //   headers: authHeaders,
+    //   params,
+    // });
 
     // console.log(response.data)
     // console.dir(response.data, { depth: null, colors: true });

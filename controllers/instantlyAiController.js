@@ -330,6 +330,8 @@ class instantlyAiController {
                 email,
                 setErrorOccurred: this.setErrorOccurred.bind(this),
               });
+              console.log("MAP TO SHEET ROW RESULT")
+              console.log(row)
             } catch (e) {
               console.warn("mapToSheetRow failed", {
                 leadEmail: lead && (lead.email || lead.lead),

@@ -1,4 +1,4 @@
-require("dotenv").config({quiet: true});
+require("dotenv").config({ quiet: true });
 const { extractReply } = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
@@ -8,39 +8,41 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const emailBodyText = email?.body?.text || "";
   // const emailBodyText = email?.body?.text || payload.text || "";
-  
-  console.log("MApToSheetRow -------------")
-  console.log(lead)
-  console.log(email)
+
+  console.log("MApToSheetRow -------------");
+  console.log(lead);
+  console.log(email);
 
   // If there is no email content, skip extraction entirely
-  if (!emailBodyText || (typeof emailBodyText === "string" && emailBodyText.trim() === "")) {
+  if (
+    !emailBodyText ||
+    (typeof emailBodyText === "string" && emailBodyText.trim() === "")
+  ) {
     throw new Error("Empty email content; skipping extraction");
   }
 
   // If email body exceeds 500 words, skip this lead's email without attempting extraction
-  const wordCount = typeof emailBodyText === "string"
-    ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
-    : 0;
+  const wordCount =
+    typeof emailBodyText === "string"
+      ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
+      : 0;
   if (wordCount > 500) {
-    console.log("Email body exceeds 500 words; skipping extraction")
+    console.log("Email body exceeds 500 words; skipping extraction");
     throw new Error("Email body exceeds 500 words; skipping extraction");
   }
 
-    // Use AI-powered extraction
+  // Use AI-powered extraction
   const extracted = await extractReply({
     emailContent: emailBodyText || "",
-    content_preview : email.content_preview || "",
+    content_preview: email.content_preview || "",
     setErrorOccurred,
   });
-  console.log("extracted -LLM")
-  console.log(extracted)
+  console.log("extracted -LLM");
+  console.log(extracted);
 
   // split user_name into firstname/lastname
   let firstName = lead?.first_name || "";
   let lastName = lead?.last_name || "";
-
-
 
   if ((!firstName || !lastName) && payload.user_name) {
     const parts = payload.user_name.trim().split(/\s+/);
@@ -77,23 +79,15 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   if (!phone1) phone1 = payload.phone1 || "";
   if (!phone2) phone2 = payload.phone2 || "";
 
-  let salesPerson = extracted.salesPerson || "";
-  let salesPersonEmail = extracted.salesPersonEmail || "";
+  let salesPerson = "";
+  let salesPersonEmail = "";
 
-  // Fallback: use lead.to_address_json if missing
-  if (
-    (!salesPerson || !salesPersonEmail) &&
-    Array.isArray(lead?.to_address_json) &&
-    lead.to_address_json.length > 0
-  ) {
-    const toAddr = lead.to_address_json[0];
-    console.log(toAddr)
-    console.log("toAddr")
-    salesPerson = salesPerson || toAddr.name || "";
-    salesPersonEmail = salesPersonEmail || toAddr.address || "";
+  // Use lead.to_address_json if available
+  if (Array.isArray(email?.to_address_json) && email.to_address_json.length > 0) {
+    const toAddr = email.to_address_json[0];
+    salesPerson = toAddr.name || "";
+    salesPersonEmail = toAddr.address || "";
   }
-
-
 
   const emailSignature = extracted.reply
     ? splitOnParagraphs(extracted.reply).slice(-2).join("\n\n")
@@ -111,8 +105,8 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     company: lead?.company_name || lead?.company || "",
     "company phone#": lead?.phone || "none",
     "phone#from email": phoneFromEmail || "none",
-    "lead first name": firstName || extracted.senderFirstName ,
-    "lead last name":  lastName || extracted.senderLastName,
+    "lead first name": firstName || "",
+    "lead last name": lastName || "",
     "lead email": leadEmail,
     "Column 2": leadEmail,
     "email reply": extracted.reply || "",
@@ -131,7 +125,6 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     "status after the call": "none",
     "number of calls spoken with the leads": "",
     "@dropdown": "",
-
   };
 }
 

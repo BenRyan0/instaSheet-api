@@ -1,16 +1,19 @@
 require("dotenv").config({ silent: true });
 
 function cleanEmailContent(rawEmail) {
-  let cleaned = rawEmail
+ let cleaned = rawEmail
     // Keep header but remove forwarded separators
     .replace(/-{2,}Original Message-{2,}/gi, '')
-    // Remove older quoted messages (e.g. "On Thu, ... wrote:")
+    // Remove quoted message headers (e.g., "On Thu, ... wrote:")
+    // .replace(/On\s.+wrote:/gi, '')
     // Remove common signature closings
-    .replace(/(With appreciation,|All the best,|Sincerely,|Regards,)\s*[\s\S]*$/gi, '')
+    // .replace(/(?:\n|^)(With appreciation,|All the best,|Sincerely,|Regards,|Kindest regards,)\s*[\s\S]*$/gi, '')
+    // Remove email separators made of underscores or dashes
+    .replace(/_{5,}|-{5,}/g, '')
+    // Remove quote markers like ">", "> >", "> > >"
+    .replace(/(^|\n)\s*>+\s?/g, '$1')
     // Collapse multiple newlines into a single space
     .replace(/\n+/g, ' ')
-      // Remove quote markers like ">", "> >", "> > >"
-    .replace(/(^|\n)\s*>+\s?/g, '$1')
     // Remove multiple spaces
     .replace(/\s{2,}/g, ' ')
     // Trim leading/trailing spaces

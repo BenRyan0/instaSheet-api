@@ -1,6 +1,6 @@
 const con = require("../db/db");
 const bcrypt = require("bcrypt");
-require("dotenv").config();
+require("dotenv").config({quiet: true});
 var jwt = require("jsonwebtoken");
 const { createToken } = require("../utils/tokenCreate");
 const { responseReturn } = require("../utils/response");

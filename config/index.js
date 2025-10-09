@@ -1,5 +1,5 @@
 // Instantly.ai base api endpoint
-require('dotenv').config()
+require('dotenv').config({quiet: true})
 
 const API_BASE =
   process.env.INSTANTLY_API_BASE?.trim() || "https://api.instantly.ai";

@@ -1,12 +1,13 @@
 // db.js
 const { Client } = require('pg');
+require("dotenv").config({ silent: true });
 
 const con = new Client({
   host: "localhost",
-  user: "postgres",
+  user: process.env.PG_USER,
   port: 5432,
-  password: "root",
-  database: "insta-sheet-db"
+  password: process.env.PG_PASSWORD,
+  database: process.env.PG_DB
 });
 
 con.connect()

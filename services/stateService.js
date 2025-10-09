@@ -94,6 +94,7 @@ function summarizeState(state) {
     aiInterestThreshold: state.aiInterestThreshold,
     totalEncoded : state.totalEncoded,
     errorMessage : state.errorMessage  | ""
+    
   }
 }
 

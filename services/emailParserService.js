@@ -1,352 +1,77 @@
 require("dotenv").config({ silent: true });
 
-async function extractReply({ emailContent, setErrorOccurred, useLocal = false }) {
+function cleanEmailContent(rawEmail) {
+  let cleaned = rawEmail
+    // Keep header but remove forwarded separators
+    .replace(/-{2,}Original Message-{2,}/gi, '')
+    // Remove older quoted messages (e.g. "On Thu, ... wrote:")
+    // Remove common signature closings
+    .replace(/(With appreciation,|All the best,|Sincerely,|Regards,)\s*[\s\S]*$/gi, '')
+    // Collapse multiple newlines into a single space
+    .replace(/\n+/g, ' ')
+      // Remove quote markers like ">", "> >", "> > >"
+    .replace(/(^|\n)\s*>+\s?/g, '$1')
+    // Remove multiple spaces
+    .replace(/\s{2,}/g, ' ')
+    // Trim leading/trailing spaces
+    .trim();
+
+  return cleaned;
+}
+
+
+async function extractReply({ emailContent,content_preview, setErrorOccurred }) {
   try {
-    if (!emailContent || (typeof emailContent === "string" && emailContent.trim() === "")) {
+    console.log("emailContent")
+    console.log(emailContent)
+    // Clean the incoming email text
+    const cleanedContent = cleanEmailContent(emailContent);
+
+    console.log("cleanedContent")
+    console.log(cleanedContent)
+    // Skip if empty after cleaning
+    if (!cleanedContent) {
       if (setErrorOccurred) setErrorOccurred(false);
       return normalizeSchema({});
     }
 
-    console.log("emailContent -extractReply")
-    console.log(emailContent)
-    const timeoutMs = Number(process.env.EMAIL_PARSER_TIMEOUT_MS || 60000);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch("http://localhost:5678/webhook/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emailContent: cleanedContent, content_preview: content_preview }),
+    });
 
-    // --- Build system prompt ---
-    const systemPrompt = [
-      "You are an expert email parsing and extraction system.",
-      "Your task is to extract structured information from a raw email thread into valid JSON.",
-      "",
-      "STRICT RULES:",
-      "- Output ONLY a valid JSON object — no markdown, explanations, or text outside the braces.",
-      "- Never include ```json or ``` markers.",
-      "- Each field must be a string (never null). If not found, use an empty string ('').",
-      "",
-      "FIELD DEFINITIONS:",
-      "- reply: The main written message from the latest sender. Exclude quoted history, disclaimers, and signatures.",
-      "- senderFirstName: The first name of the actual sender of the most recent reply (from their own sign-off or header).",
-      "- senderLastName: The last name of that same person.",
-      "- original: The full email thread as provided.",
-      "- salesPerson: The full name of any sales or account manager mentioned in the email.",
-      "- salesPersonEmail: The email address of that salesperson (if mentioned).",
-      "- signature: The sender’s signature block (text after sign-offs like 'Best,' 'Regards,' etc.).",
-      "",
-      "OUTPUT SCHEMA (must match exactly):",
-      `{
-        "reply": "string",
-        "senderFirstName": "string",
-        "senderLastName": "string",
-        "original": "string",
-        "salesPerson": "string",
-        "salesPersonEmail": "string",
-        "signature": "string"
-      }`,
-      "",
-      "Focus on correctly identifying senderFirstName and senderLastName from the reply section or email header.",
-    ].join("\n");
-
-    // --- Helper function to call either remote or local LLM ---
-    async function callLLM(isLocal = false) {
-      const url = isLocal
-        ? "http://localhost:11434/api/chat"
-        : "https://openrouter.ai/api/v1/chat/completions";
-
-      const headers = isLocal
-        ? { "Content-Type": "application/json" }
-        : {
-            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-          };
-
-      const model = isLocal
-        ? process.env.LOCAL_LLM
-        : process.env.OPEN_ROUTER_MODEL;
-
-      console.log(`extractReply - Using model: ${model} (${isLocal ? "Local" : "OpenRouter"})`);
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: emailContent },
-          ],
-          temperature: 0,
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`LLM returned ${response.status}`);
-      }
-
-      return await response.text();
-    }
-
-    // --- Try OpenRouter first ---
-    let rawText;
-    try {
-      rawText = await callLLM(false);
-      console.log("extractReply: received OpenRouter response");
-    } catch (err) {
-      console.warn("OpenRouter call failed, switching to local LLM:", err.message);
-      try {
-        rawText = await callLLM(true);
-        console.log("extractReply: received Local LLM fallback response");
-      } catch (fallbackErr) {
-        console.error("Local LLM fallback failed:", fallbackErr.message);
-        if (setErrorOccurred) setErrorOccurred(true);
-        return normalizeSchema({});
-      }
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    // --- Parse model response (works for both local & OpenRouter) ---
-    let modelOutput = "";
-    try {
-      const data = JSON.parse(rawText);
-
-      // Case 1: direct JSON output (rare but supported)
-      if (
-        data &&
-        typeof data === "object" &&
-        (Object.prototype.hasOwnProperty.call(data, "reply") ||
-          (data.choices === undefined &&
-            data.message === undefined &&
-            data.output === undefined))
-      ) {
-        if (setErrorOccurred) setErrorOccurred(false);
-        return normalizeSchema(data);
-      }
-
-      // Case 2: normal LLM wrapped output
-      modelOutput =
-        data.choices?.[0]?.message?.content ||
-        data.choices?.[0]?.text ||
-        data.message?.content ||
-        data.output ||
-        data.content ||
-        data.result ||
-        "";
-    } catch {
-      modelOutput = rawText;
-    }
-
-    // --- Clean & extract JSON ---
-    const cleaned = modelOutput
-      .replace(/^```(?:json)?/i, "")
-      .replace(/```$/i, "")
-      .trim();
-
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error("extractReply non-OK response:", response.status, errText);
       if (setErrorOccurred) setErrorOccurred(true);
       return normalizeSchema({});
     }
 
-    let parsedJSON;
-    try {
-      parsedJSON = JSON.parse(jsonMatch[0]);
-    } catch (err) {
-      console.error("JSON parse failed:", err.message);
-      if (setErrorOccurred) setErrorOccurred(true);
-      return normalizeSchema({});
-    }
+    const data = await response.json().catch(() => ({}));
+    const reply = data.reply || "";
 
-    const normalized = normalizeSchema(parsedJSON);
     if (setErrorOccurred) setErrorOccurred(false);
-    return normalized;
+    return normalizeSchema({ reply });
   } catch (err) {
-    console.error("Fatal extractReply error:", err.message);
-    return errorResult(err.message, "", setErrorOccurred);
+    console.error("Error calling webhook:", err.message);
+    if (setErrorOccurred) setErrorOccurred(true);
+    return normalizeSchema({});
   }
 }
 
-
-// async function extractReply({ emailContent, setErrorOccurred, useLocal = false }) {
-//   try {
-//     // Fast-skip: empty content should not trigger LLM calls
-//     if (!emailContent || (typeof emailContent === "string" && emailContent.trim() === "")) {
-//       if (setErrorOccurred) setErrorOccurred(false);
-//       return normalizeSchema({});
-//     }
-
-//     const timeoutMs = Number(process.env.EMAIL_PARSER_TIMEOUT_MS || 60000);
-//     const controller = new AbortController();
-//     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-//     const url = useLocal
-//       ? "http://localhost:11434/api/chat"
-//       : "https://openrouter.ai/api/v1/chat/completions";
-
-//     const headers = useLocal
-//       ? { "Content-Type": "application/json" }
-//       : {
-//           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-//           "Content-Type": "application/json",
-//         };
-
-//     const model = useLocal
-//       ? process.env.LOCAL_LLM
-//       : process.env.OPEN_ROUTER_MODEL;
-
-//     console.log("extractReply - Using model: OPENROUTER_API_KEY ", model);
-
-//     // --- Construct system prompt ---
-//     const systemPrompt = [
-//       "You are an expert email parsing and extraction system.",
-//       "Your task is to extract structured information from a raw email thread into valid JSON.",
-//       "",
-//       "STRICT RULES:",
-//       "- Output ONLY a valid JSON object — no markdown, explanations, or text outside the braces.",
-//       "- Never include ```json or ``` markers.",
-//       "- Each field must be a string (never null). If not found, use an empty string ('').",
-//       "",
-//       "FIELD DEFINITIONS:",
-//       "- reply: The main written message from the latest sender. Exclude quoted history, disclaimers, and signatures.",
-//       "- senderFirstName: The first name of the actual sender of the most recent reply (from their own sign-off or header).",
-//       "- senderLastName: The last name of that same person.",
-//       "- original: The full email thread as provided.",
-//       "- salesPerson: The full name of any sales or account manager mentioned in the email.",
-//       "- salesPersonEmail: The email address of that salesperson (if mentioned).",
-//       "- signature: The sender’s signature block (text after sign-offs like 'Best,' 'Regards,' etc.).",
-//       "",
-//       "OUTPUT SCHEMA (must match exactly):",
-//       `{
-//         "reply": "string",
-//         "senderFirstName": "string",
-//         "senderLastName": "string",
-//         "original": "string",
-//         "salesPerson": "string",
-//         "salesPersonEmail": "string",
-//         "signature": "string"
-//       }`,
-//       "",
-//       "Focus on correctly identifying senderFirstName and senderLastName from the reply section or email header.",
-//     ].join("\n");
-
-//     // --- Make API call ---
-//     const response = await fetch(url, {
-//       method: "POST",
-//       headers,
-//       body: JSON.stringify({
-//         model,
-//         messages: [
-//           { role: "system", content: systemPrompt },
-//           { role: "user", content: emailContent },
-//         ],
-//         temperature: 0,
-//         stream: false,
-//       }),
-//       signal: controller.signal,
-//     });
-
-//     clearTimeout(timeoutId);
-
-//     // Non-OK provider responses: soft-fail and continue
-//     if (!response.ok) {
-//       const errText = await response.text().catch(() => "");
-//       console.error("extractReply non-OK response:", response.status, errText);
-//       if (setErrorOccurred) setErrorOccurred(false);
-//       return normalizeSchema({});
-//     }
-
-//     const rawText = await response.text();
-//     console.log("extractReply received response");
-
-//     // --- Parse model response wrapper (OpenRouter / Local LLM) ---
-//     let modelOutput = "";
-//     try {
-//       const data = JSON.parse(rawText);
-//       // Accept direct JSON outputs that already match our schema
-//       if (data && typeof data === "object" && (
-//         Object.prototype.hasOwnProperty.call(data, "reply") ||
-//         (data.choices === undefined && data.message === undefined && data.output === undefined)
-//       )) {
-//         const direct = normalizeSchema(data);
-//         if (setErrorOccurred) setErrorOccurred(false);
-//         return direct;
-//       }
-//       // Try a variety of known shapes
-//       modelOutput = (
-//         (useLocal
-//           ? (data.message?.content || data.output)
-//           : (data.choices?.[0]?.message?.content || data.choices?.[0]?.text))
-//         || data.content
-//         || data.result
-//         || ""
-//       ).trim();
-//     } catch (err) {
-//       console.error("Error parsing top-level response:", err.message);
-//       if (setErrorOccurred) setErrorOccurred(false);
-//       return normalizeSchema({});
-//     }
-
-//     console.log("Raw model output:", modelOutput);
-
-//     // --- Clean and parse final JSON output ---
-//     let parsedJSON;
-//     try {
-//       const cleaned = modelOutput
-//         .replace(/^```(?:json)?/i, "")
-//         .replace(/```$/i, "")
-//         .trim();
-
-//       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-//       if (!jsonMatch) {
-//         if (setErrorOccurred) setErrorOccurred(false);
-//         return normalizeSchema({});
-//       }
-
-//       parsedJSON = JSON.parse(jsonMatch[0]);
-//     } catch (err) {
-//       console.error("Error parsing JSON content:", err.message);
-//       if (setErrorOccurred) setErrorOccurred(false);
-//       return normalizeSchema({});
-//     }
-
-//     // --- Normalize schema ---
-//     const normalized = normalizeSchema(parsedJSON);
-
-//     if (setErrorOccurred) setErrorOccurred(false);
-//     return normalized;
-//   } catch (err) {
-//     console.error("Error calling LLM:", err.message);
-//     return errorResult(err.message, "", setErrorOccurred);
-//   }
-// }
-
-// --- Helper: Standardize schema ---
+/**
+ * Normalizes output structure
+ */
 function normalizeSchema(obj = {}) {
   return {
     reply: obj.reply || "",
-    original: obj.original || "",
-    senderFirstName: obj.senderFirstName || "",
-    senderLastName: obj.senderLastName || "",
-    salesPerson: obj.salesPerson || "",
-    salesPersonEmail: obj.salesPersonEmail || "",
-    signature: obj.signature || "",
-  };
-}
-
-// --- Helper: Error response builder ---
-function errorResult(message, raw, setErrorOccurred) {
-  if (setErrorOccurred) setErrorOccurred(true);
-  return {
-    reply: "",
-    original: "",
     senderFirstName: "",
     senderLastName: "",
+    original: "",
     salesPerson: "",
     salesPersonEmail: "",
     signature: "",
-    error: message,
-    raw,
   };
 }
 

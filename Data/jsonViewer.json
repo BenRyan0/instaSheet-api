@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "id": "0199ba2e-a75e-70c9-87a7-d4dfde074f5b",
+      "timestamp_created": "2025-10-06T15:40:47.000Z",
+      "timestamp_email": "2025-10-06T15:39:12.000Z",
+      "message_id": "<423CB8D9-AD2A-4175-AFD8-FF0C084B89CE@gmail.com>",
+      "subject": "Re: Funding next day options for ABRAHAM BALDERAS CONSTRUCTION LLC",
+      "to_address_email_list": "jessica@grouphealthbrightcare.com",
+      "body": {
+        "text": "Thanks for reaching out I could use funding\n\n> On Oct 5, 2025, at 11:06 AM, Jessica Flores <jessica@grouphealthbrightcare.com> wrote:\n> \n> ﻿Hi, mind a quick ask: are you the right person at ABRAHAM BALDERAS CONSTRUCTION LLC to talk about funds ready the next business day, or can you let me know who is?\n> \n> Quick context: our company can make funding available based on sales, and credit rating doesn't matter much.\n> \n> As long as ABRAHAM BALDERAS CONSTRUCTION LLC has been operating for at least four months, we could fund you within one day or less.\n> \n> Do you want me to send a short outline, or would you like to schedule a brief call? If that sounds useful, reply yes.\n> \n> Thank you,\n> \n> Jessica Flores\n"
+      },
+      "organization_id": "7270c28d-9cf7-45de-96af-5c747cf1b56a",
+      "eaccount": "jessica@grouphealthbrightcare.com",
+      "from_address_email": "abebalderas@gmail.com",
+      "campaign_id": "cd8ba3c5-8378-415d-805b-7181475b06be",
+      "lead": "abebalderas@gmail.com",
+      "ue_type": 2,
+      "step": "0_0_5",
+      "is_unread": 1,
+      "ai_interest_value": 1,
+      "is_focused": 1,
+      "i_status": 1,
+      "thread_id": "cd-lHTyLJBDJG-mqMcCvuDu53v",
+      "content_preview": "Thanks for reaching out I could use funding  > On Oct 5, 202",
+      "from_address_json": [
+        {
+          "address": "abebalderas@gmail.com",
+          "name": "Abraham Balderas"
+        }
+      ],
+      "to_address_json": [
+        {
+          "address": "jessica@grouphealthbrightcare.com",
+          "name": "Jessica Flores"
+        }
+      ]
+    }
+  ],
+  "next_starting_after": "0199ba2e-a75e-70c9-87a7-d4dfde074f5b"
+}

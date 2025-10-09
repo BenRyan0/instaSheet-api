@@ -21,7 +21,10 @@ const {
   normalizeKey,
   markProcessed,
 } = require("../services/dedupService");
-const { fetchRepliesForLeadsBatch, fetchRepliesForLead } = require("../services/emailService");
+const {
+  fetchRepliesForLeadsBatch,
+  fetchRepliesForLead,
+} = require("../services/emailService");
 const { isInterestedReply } = require("../utils/filters");
 const {
   initState,
@@ -103,6 +106,8 @@ class instantlyAiController {
     const spreadsheetId = process.env.SPREADSHEET_ID;
     try {
       const rowJson = await normalizeRow(emailRow);
+      console.log("rowJson");
+      console.log(rowJson);
 
       // --- Step 1: Address present? ---
       if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip) {
@@ -158,28 +163,29 @@ class instantlyAiController {
     }
   }
 
-  stopIncodingRun = async(req, res) =>{
+  stopIncodingRun = async (req, res) => {
     try {
-      console.log("STOP INCODING RUNS INITIATED")
-      this.setErrorOccurred(true)
-      
+      console.log("STOP INCODING RUNS INITIATED");
+      this.setErrorOccurred(true);
+
       responseReturn(res, 200, {
-        message: "Encoding Runs Successfuly Stopped"
-      })
+        message: "Encoding Runs Successfuly Stopped",
+      });
     } catch (error) {
-      console.log(error)
-      responseReturn(res, 500,{
-        message: "Stopping the Encoding runs into error"
-      })      
+      console.log(error);
+      responseReturn(res, 500, {
+        message: "Stopping the Encoding runs into error",
+      });
     }
-  }
+  };
 
   getInterestedRepliesOnly_ = async (req, res) => {
     var i = 0;
     this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
-      // console.log(opts);
+      console.log(req.body);
+      console.log("req.body");
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
@@ -206,25 +212,47 @@ class instantlyAiController {
           aiThreshold: opts.aiInterestThreshold,
           authHeaders,
         });
+
         const leads = normalizeLeadsArray(page);
         cursor = getNextCursor(page);
-        // console.log(cursor);
-        // console.log("cursor");
 
         const batch = filterNewLeads(leads, seen);
-        // console.log(batch.length);
-        // console.log("batch.length");
-        console.log(batch)
+
         if (batch.length === 0) continue;
 
         // Sequentially process each lead: wait for replies and email processing before next lead
         for (const lead of batch) {
-          const { emails } = await fetchRepliesForLead(lead, {
+          const result = await fetchRepliesForLead(lead, {
             campaignId,
             perLeadLimit: opts.emailsPerLead,
             authHeaders,
             delayMs: opts.delayMs,
           });
+
+          // Recognize skip or error before proceeding
+          if (result.skipped) {
+            console.log(
+              `[SKIP] Lead skipped (${result.reason}): ${lead.email}`
+            );
+            // Optionally mark as processed so it's not rechecked next run
+            const emailKey = normalizeKey(lead.email || lead.lead);
+            const key = emailKey || lead.id;
+            if (key) {
+              await markProcessed(key, redisClient, dedupKey, seen);
+            }
+            continue;
+          }
+
+          if (result.error) {
+            console.warn(
+              `[ERROR] Skipping lead due to fetch error: ${lead.email}`,
+              result.error
+            );
+            continue;
+          }
+
+          const { emails } = result;
+
           if (this.errorOccurred) break;
           state.nextLead();
           i++;
@@ -261,12 +289,18 @@ class instantlyAiController {
             // Per-email message-id dedup removed; rely solely on lead email/id key
 
             // Skip very long emails (>500 words) and mark as processed to avoid future repeats
-            const emailBodyText = (email && email.body && email.body.text) || (lead && lead.payload && lead.payload.text) || "";
-            const wordCount = typeof emailBodyText === "string"
-              ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
-              : 0;
+            const emailBodyText =
+              (email && email.body && email.body.text) ||
+              (lead && lead.payload && lead.payload.text) ||
+              "";
+            const wordCount =
+              typeof emailBodyText === "string"
+                ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
+                : 0;
             if (wordCount > 500) {
-              console.log(`[skip] email body too long (${wordCount} words), marking processed.`);
+              console.log(
+                `[skip] email body too long (${wordCount} words), marking processed.`
+              );
               if (key) {
                 await markProcessed(key, redisClient, dedupKey, seen);
               }
@@ -275,6 +309,22 @@ class instantlyAiController {
 
             let row;
             try {
+              if (
+                !email.content_preview ||
+                email.content_preview.trim() === ""
+              ) {
+                console.log(
+                  `[skip] Missing content_preview for ${
+                    lead.email || lead.lead
+                  }`
+                );
+                // Mark as processed so it won't be retried next time
+                if (key) {
+                  await markProcessed(key, redisClient, dedupKey, seen);
+                }
+                continue;
+              }
+
               row = await mapToSheetRow({
                 lead,
                 email,
@@ -291,7 +341,10 @@ class instantlyAiController {
                   await markProcessed(key, redisClient, dedupKey, seen);
                 }
               } catch (markErr) {
-                console.warn("Failed to mark as processed after mapToSheetRow error", markErr && markErr.message);
+                console.warn(
+                  "Failed to mark as processed after mapToSheetRow error",
+                  markErr && markErr.message
+                );
               }
               continue;
             }
@@ -344,6 +397,7 @@ class instantlyAiController {
 
         // Early exit if error flag triggered mid-loop
         if (this.errorOccurred) {
+          console.log("ERR");
           state.stop();
           state.errorMessage = "Processing aborted due to error.";
           state.stoppedEarly = true;

@@ -1,12 +1,14 @@
 require("dotenv").config({ silent: true });
 const axios = require("axios");
+const redisClient = require("../config/redisClient.js");
 const { API_BASE, LEADS_LIST_PATH } = require("../config");
-// const LEADS_LIST_PATH = "/api/v2/leads/list";
-// const API_BASE = "https://api.instantly.ai";
 const { colorize } = require("../utils/colorLogger");
 const { patterns } = require("../Filters/addressRegexConfig.json");
 const { spawn } = require("child_process");
 const { initGoogleClients } = require("../services/googleClient.js");
+
+
+
 
 const regexes = {};
 for (const [key, { pattern, flags }] of Object.entries(patterns)) {
@@ -18,36 +20,60 @@ const FILTER_LEAD_INTERESTED_BASE = {
   email_reply_count: { gt: 0 },
 };
 
+
 async function fetchLeadsPage({
   campaignId,
   cursor = null,
   pageLimit,
-  aiThreshold,
   authHeaders,
 }) {
-  console.log("fetchLeadsPage");
-  // Combine base filters with dynamic AI threshold and campaign filter
-  const filters = {
-    ...FILTER_LEAD_INTERESTED_BASE,
-    ai_interest_value: { gte: aiThreshold },
-    campaign: campaignId,
-  };
+  console.log("FetchLeadsPage START");
 
-  // Request payload
-  const body = {
-    filters,
-    limit: pageLimit,
-    ...(cursor && { starting_after: cursor }),
-  };
+  const redisKey = `insta:campaign_cursor:${campaignId}`;
 
-  // Make the API call
-  const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
-    headers: authHeaders,
-  });
-  // Return the raw array of leads
-  // console.log(response.data);
-  // console.log("response.data");
-  return response.data;
+  try {
+    // 1️⃣ Try to get existing cursor from Redis
+    let storedCursor = await redisClient.get(redisKey);
+
+    // 2️⃣ Decide which cursor to use
+    const effectiveCursor = storedCursor || cursor || "";
+
+    console.log(`Using cursor for campaign ${campaignId}:`, effectiveCursor);
+
+    // 3️⃣ Prepare request body
+    const body = {
+      filter: "FILTER_LEAD_INTERESTED",
+      campaign: campaignId,
+      in_campaign: true,
+      limit: pageLimit,
+      starting_after: effectiveCursor,
+    };
+
+    // 4️⃣ Send request
+    const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
+      headers: authHeaders,
+    });
+
+    console.log("response.data fetchLeadsPage");
+    console.dir(response.data, { depth: null, colors: true });
+
+    // 5️⃣ Update cursor in Redis (if provided by API)
+    if (response.data?.next_starting_after) {
+      await redisClient.set(redisKey, response.data.next_starting_after);
+      console.log(
+        `Updated Redis cursor for ${campaignId}:`,
+        response.data.next_starting_after
+      );
+    } else {
+      console.log("No new cursor returned by API — keeping current cursor.");
+    }
+
+    console.log("FetchLeadsPage END");
+    return response.data;
+  } catch (error) {
+    console.error("Error in fetchLeadsPage:", error.message);
+    throw error;
+  }
 }
 
 function getNextCursor(apiResponse) {
@@ -91,7 +117,7 @@ async function normalizeRow(emailRow) {
     "status after the call": "",
     "number of calls spoken with the leads ": "",
     "@dropdown": "",
-  };
+   };
 }
 
 async function isUSByAI({ addressText, setErrorOccurred }) {
@@ -363,7 +389,7 @@ async function isActuallyInterested(
       ? process.env.LOCAL_LLM
       : process.env.OPEN_ROUTER_MODEL2;
 
-      console.log(`model OPENROUTER_API_SEC_KEY : ${model}`)
+    console.log(`model OPENROUTER_API_SEC_KEY : ${model}`);
 
     const resp = await fetch(url, {
       method: "POST",
@@ -501,7 +527,7 @@ async function isActuallyInterested(
                   "Classify whether the following email reply from a prospect shows genuine interest",
                   "—asking for pricing, next steps, scheduling, or more info.",
                   "Ignore promotional pitches and auto-replies.",
-                  'Answer strictly "true" or "false".'
+                  'Answer strictly "true" or "false".',
                 ].join("\n"),
               },
               { role: "user", content: text },
@@ -541,10 +567,14 @@ async function isActuallyInterested(
           }
 
           const localToken = (localOut.match(/\b(true|false)\b/i) || [])[1];
-          const localNorm = (localToken || localOut).toString().toLowerCase().trim();
+          const localNorm = (localToken || localOut)
+            .toString()
+            .toLowerCase()
+            .trim();
 
           if (localNorm === "true") {
-            if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
+            if (typeof addTotalInterestedLLM === "function")
+              addTotalInterestedLLM(1);
             return true;
           }
           if (localNorm === "false") {
@@ -552,7 +582,10 @@ async function isActuallyInterested(
           }
         }
       } catch (fallbackErr) {
-        console.warn("Local fallback failed:", fallbackErr && fallbackErr.message);
+        console.warn(
+          "Local fallback failed:",
+          fallbackErr && fallbackErr.message
+        );
       }
     }
     // if (setErrorOccurred) setErrorOccurred(true);

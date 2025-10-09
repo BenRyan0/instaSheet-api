@@ -1,59 +1,19 @@
 require("dotenv").config({ silent: true });
 
-// services/emailParserService.js
-// Pure-JS parser from before
-function parseEmailThread(rawText) {
-  const normalized = rawText.replace(/\n{3,}/g, "\n\n").trim();
-  const threadRegex = /^---- On [\s\S]+? wrote ---$/m;
-  const [head, quoteAndBelow] = normalized.split(threadRegex);
-  const original = quoteAndBelow ? quoteAndBelow.trim() : "";
 
-  const headerMatch = rawText.match(
-    /^---- On [^<]+? ([^<]+) <([^>]+)> wrote ---$/m
-  );
-  const salesPerson = headerMatch ? headerMatch[1].trim() : "";
-  const salesPersonEmail = headerMatch ? headerMatch[2].trim() : "";
 
-  const sigStart = head.search(/\n(?:Thanks(?: & Regards)?|Best|Cheers)/i);
-  const sigBlock = sigStart > 0 ? head.slice(sigStart).trim() : "";
-  const signature = Array.from(new Set(sigBlock.split("\n")))
-    .join("\n")
-    .trim();
-
-  const reply = sigStart > 0 ? head.slice(0, sigStart).trim() : head.trim();
-
-  const nameMatch = signature.match(/^([\w'-]+)\s+([\w'-]+)/m);
-  const senderFirstName = nameMatch ? nameMatch[1] : "";
-  const senderLastName = nameMatch ? nameMatch[2] : "";
-
-  return {
-    reply,
-    original,
-    senderFirstName,
-    senderLastName,
-    salesPerson,
-    salesPersonEmail,
-    signature,
-  };
-}
-
-// Main extractor with LLM fallback
-async function extractReply({
-  emailContent,
-  setErrorOccurred,
-  useLocal = false,
-}) {
-  // 1. Attempt deterministic parse first
-  const fallback = parseEmailThread(emailContent);
-  console.log(fallback);
-  console.log("fallback");
-  if (fallback.reply || fallback.original || fallback.signature) {
-    if (setErrorOccurred) setErrorOccurred(false);
-    return fallback;
-  }
-
-  // 2. Fallback to LLM if no reply found
+async function extractReply({ emailContent, setErrorOccurred, useLocal = false }) {
   try {
+    // Fast-skip: empty content should not trigger LLM calls
+    if (!emailContent || (typeof emailContent === "string" && emailContent.trim() === "")) {
+      if (setErrorOccurred) setErrorOccurred(false);
+      return normalizeSchema({});
+    }
+
+    const timeoutMs = Number(process.env.EMAIL_PARSER_TIMEOUT_MS || 60000);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     const url = useLocal
       ? "http://localhost:11434/api/chat"
       : "https://openrouter.ai/api/v1/chat/completions";
@@ -69,102 +29,159 @@ async function extractReply({
       ? process.env.LOCAL_LLM
       : process.env.OPEN_ROUTER_MODEL;
 
-    const resp = await fetch(url, {
+    console.log("extractReply - Using model: OPENROUTER_API_KEY ", model);
+
+    // --- Construct system prompt ---
+    const systemPrompt = [
+      "You are an expert email parsing and extraction system.",
+      "Your task is to extract structured information from a raw email thread into valid JSON.",
+      "",
+      "STRICT RULES:",
+      "- Output ONLY a valid JSON object — no markdown, explanations, or text outside the braces.",
+      "- Never include ```json or ``` markers.",
+      "- Each field must be a string (never null). If not found, use an empty string ('').",
+      "",
+      "FIELD DEFINITIONS:",
+      "- reply: The written reply from the respondent that is placed first in the text. Exclude quoted history, disclaimers, and signatures.",
+      "- senderFirstName: The first name of the actual sender of the most recent reply (from their own sign-off or header).",
+      "- senderLastName: The last name of that same person.",
+      "- original: The full email thread as provided.",
+      "- salesPerson: The full name of any sales or account manager mentioned in the email.",
+      "- salesPersonEmail: The email address of that salesperson (if mentioned).",
+      "- signature: The sender’s signature block (text after sign-offs like 'Best,' 'Regards,' etc.).",
+      "",
+      "OUTPUT SCHEMA (must match exactly):",
+      `{
+        "reply": "string",
+        "senderFirstName": "string",
+        "senderLastName": "string",
+        "original": "string",
+        "salesPerson": "string",
+        "salesPersonEmail": "string",
+        "signature": "string"
+      }`,
+      "",
+      "Focus on correctly identifying the reply that is ussually the first paragraph",
+    ].join("\n");
+
+    // --- Make API call ---
+    const response = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify({
         model,
         messages: [
-          {
-            role: "system",
-            content: [
-              "You are an expert email parsing and extraction system.",
-              "Your job is to analyze the provided raw email thread and return a single JSON object with precise fields.",
-              "",
-              "General Rules:",
-              "- You MUST only output a valid JSON object — no markdown, comments, or text before/after it.",
-              "- Do NOT include ```json or any formatting indicators.",
-              "- Each field must be a plain string (never null). If not found, return an empty string ('').",
-              "",
-              "Definition of key fields:",
-              "- reply: The main written message from the most recent sender. Exclude any quoted messages, automatic disclaimers, or signatures.",
-              "- senderFirstName: The first name of the person who wrote the most recent reply. Use the sender's **own name**, typically found before the signature or in the email header section (e.g., 'Best, John Doe' → John). If no full name is visible, extract the given name from the sender's line (e.g., 'From: Sarah L. Connor <sarah@company.com>' → Sarah).",
-              "- senderLastName: The last name of that same person (e.g., 'John Doe' → Doe).",
-              "- original: The full raw email thread content as provided.",
-              "- salesPerson: The full name of any sales or account manager mentioned in the email (if multiple, choose the one directly associated with the thread). Otherwise empty.",
-              "- salesPersonEmail: The email address of the sales representative if mentioned; otherwise empty.",
-              "- signature: The sender’s signature block (the text typically after a sign-off like 'Best regards,' or 'Thanks,').",
-              "",
-              "Output Schema (must match exactly):",
-              `{
-                "reply": "string",
-                "senderFirstName": "string",
-                "senderLastName": "string",
-                "original": "string",
-                "salesPerson": "string",
-                "salesPersonEmail": "string",
-                "signature": "string"
-              }`,
-              "",
-              "Focus especially on correctly identifying the sender's first and last name. Never confuse them with the recipient, sales rep, or quoted senders in older messages.",
-            ].join("\n"),
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: emailContent },
         ],
         temperature: 0,
         stream: false,
       }),
+      signal: controller.signal,
     });
 
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    clearTimeout(timeoutId);
 
-    const rawText = await resp.text();
-    let json = JSON.parse(rawText);
+    // Non-OK provider responses: soft-fail and continue
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error("extractReply non-OK response:", response.status, errText);
+      if (setErrorOccurred) setErrorOccurred(false);
+      return normalizeSchema({});
+    }
 
-    const modelOut = useLocal
-      ? json.message?.content?.trim() || json.output?.trim() || ""
-      : json.choices?.[0]?.message?.content?.trim() ||
-        json.choices?.[0]?.text?.trim() ||
-        "";
+    const rawText = await response.text();
+    console.log("extractReply received response");
 
-    // Clean and parse LLM JSON
-    let cleaned = modelOut
-      .replace(/^```(?:json)?/i, "")
-      .replace(/```$/i, "")
-      .trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) cleaned = jsonMatch[0];
-    const parsed = JSON.parse(cleaned);
+    // --- Parse model response wrapper (OpenRouter / Local LLM) ---
+    let modelOutput = "";
+    try {
+      const data = JSON.parse(rawText);
+      // Accept direct JSON outputs that already match our schema
+      if (data && typeof data === "object" && (
+        Object.prototype.hasOwnProperty.call(data, "reply") ||
+        (data.choices === undefined && data.message === undefined && data.output === undefined)
+      )) {
+        const direct = normalizeSchema(data);
+        if (setErrorOccurred) setErrorOccurred(false);
+        return direct;
+      }
+      // Try a variety of known shapes
+      modelOutput = (
+        (useLocal
+          ? (data.message?.content || data.output)
+          : (data.choices?.[0]?.message?.content || data.choices?.[0]?.text))
+        || data.content
+        || data.result
+        || ""
+      ).trim();
+    } catch (err) {
+      console.error("Error parsing top-level response:", err.message);
+      if (setErrorOccurred) setErrorOccurred(false);
+      return normalizeSchema({});
+    }
 
-    // Schema normalizer
-    const ensureSchema = (obj) => ({
-      reply: obj.reply || "",
-      original: obj.original || "",
-      senderFirstName: obj.senderFirstName || "",
-      senderLastName: obj.senderLastName || "",
-      salesPerson: obj.salesPerson || "",
-      salesPersonEmail: obj.salesPersonEmail || "",
-      signature: obj.signature || "",
-    });
+    console.log("Raw model output:", modelOutput);
+
+    // --- Clean and parse final JSON output ---
+    let parsedJSON;
+    try {
+      const cleaned = modelOutput
+        .replace(/^```(?:json)?/i, "")
+        .replace(/```$/i, "")
+        .trim();
+
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        if (setErrorOccurred) setErrorOccurred(false);
+        return normalizeSchema({});
+      }
+
+      parsedJSON = JSON.parse(jsonMatch[0]);
+    } catch (err) {
+      console.error("Error parsing JSON content:", err.message);
+      if (setErrorOccurred) setErrorOccurred(false);
+      return normalizeSchema({});
+    }
+
+    // --- Normalize schema ---
+    const normalized = normalizeSchema(parsedJSON);
 
     if (setErrorOccurred) setErrorOccurred(false);
-    return ensureSchema(parsed);
+    return normalized;
   } catch (err) {
-    console.error("extractReply error:", err);
-    if (setErrorOccurred) setErrorOccurred(true);
-    return {
-      reply: "",
-      original: "",
-      senderFirstName: "",
-      senderLastName: "",
-      salesPerson: "",
-      salesPersonEmail: "",
-      signature: "",
-      error: err.message,
-    };
+    console.error("Error calling LLM:", err.message);
+    return errorResult(err.message, "", setErrorOccurred);
   }
 }
 
-module.exports = {
-  extractReply,
-};
+// --- Helper: Standardize schema ---
+function normalizeSchema(obj = {}) {
+  return {
+    reply: obj.reply || "",
+    original: obj.original || "",
+    senderFirstName: obj.senderFirstName || "",
+    senderLastName: obj.senderLastName || "",
+    salesPerson: obj.salesPerson || "",
+    salesPersonEmail: obj.salesPersonEmail || "",
+    signature: obj.signature || "",
+  };
+}
+
+// --- Helper: Error response builder ---
+function errorResult(message, raw, setErrorOccurred) {
+  if (setErrorOccurred) setErrorOccurred(true);
+  return {
+    reply: "",
+    original: "",
+    senderFirstName: "",
+    senderLastName: "",
+    salesPerson: "",
+    salesPersonEmail: "",
+    signature: "",
+    error: message,
+    raw,
+  };
+}
+
+module.exports = { extractReply };

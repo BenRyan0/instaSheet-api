@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({quiet: true});
 const { extractReply } = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
@@ -6,8 +6,12 @@ const { colorize } = require("../utils/colorLogger");
 async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
-  const emailBodyText = email?.body?.text || payload.text || "";
-
+  const emailBodyText = email?.body?.text || "";
+  // const emailBodyText = email?.body?.text || payload.text || "";
+  
+  console.log("MApToSheetRow -------------")
+  console.log(lead)
+  console.log(email)
 
   // If there is no email content, skip extraction entirely
   if (!emailBodyText || (typeof emailBodyText === "string" && emailBodyText.trim() === "")) {
@@ -26,6 +30,7 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     // Use AI-powered extraction
   const extracted = await extractReply({
     emailContent: emailBodyText || "",
+    content_preview : email.content_preview || "",
     setErrorOccurred,
   });
   console.log("extracted -LLM")
@@ -126,6 +131,7 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     "status after the call": "none",
     "number of calls spoken with the leads": "",
     "@dropdown": "",
+
   };
 }
 

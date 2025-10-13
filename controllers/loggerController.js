@@ -41,6 +41,7 @@ class loggerController {
       throw err;
     }
   };
+
   getAllLogs = async (req, res) => {
     console.log("GET ALL LOGS");
     try {
@@ -60,6 +61,25 @@ class loggerController {
         created_at
       FROM encoding_runs
       ORDER BY created_at DESC
+    `;
+
+      const result = await con.query(query);
+      //   console.log(result);
+      responseReturn(res, 200, { logs: result.rows });
+    } catch (err) {
+      console.error("DB Fetch Error:", err);
+      responseReturn(res, 500, { error: "Failed to fetch logs" });
+    }
+  };
+
+  getAllTobeEncodedLeads = async (req, res) => {
+    console.log("GET ALL LOGS");
+    try {
+      const query = `
+     SELECT *
+      FROM toBeEncodedLeads
+      WHERE isDone = FALSE
+      ORDER BY created_at DESC;
     `;
 
       const result = await con.query(query);

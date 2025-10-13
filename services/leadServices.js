@@ -6,6 +6,9 @@ const { colorize } = require("../utils/colorLogger");
 const { patterns } = require("../Filters/addressRegexConfig.json");
 const { spawn } = require("child_process");
 const { initGoogleClients } = require("../services/googleClient.js");
+const readline = require("readline");
+const con = require("../db/db.js");
+const { getAuthHeaders } = require("../utils/auth");
 
 const regexes = {};
 for (const [key, { pattern, flags }] of Object.entries(patterns)) {
@@ -82,13 +85,9 @@ async function fetchLeadsPage({
     const leads = response.data?.items || [];
 
     // Log each email
-   console.log(
-    colorize("Fetched Leads ...", "cyan")
-  );
+    console.log(colorize("Fetched Leads ...", "cyan"));
     leads.forEach((lead, index) => {
-      console.log(
-        colorize(`${index + 1}. ${lead.email}`, "cyan")
-      );
+      console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
     });
 
     // Step 5: Handle cursor logic
@@ -360,7 +359,11 @@ async function isWebsiteUsBased(url) {
     console.error("Failed to parse JSON from Python:", err);
     throw new Error("Invalid JSON from Python script");
   }
-
+  if (typeof parsed.isUs !== 1) {
+    console.log(colorize("US based ...", "blue"));
+  } else {
+    console.log(colorize("Website not US based ...", "red"));
+  }
   // Return only true or false
   return parsed.isUs === 1;
 }
@@ -668,7 +671,7 @@ async function encodeToSheet(
 ) {
   const { sheets } = await initGoogleClients();
 
-  // 1. ensure tab exists & headers are in row 1
+  // Ensure tab exists and headers are in row 1
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
   if (!existingTabs.includes(sheetName)) {
@@ -688,15 +691,16 @@ async function encodeToSheet(
     });
   }
 
-  // 2. read all existing rows
+  // Read all existing rows
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: sheetName,
   });
+
   const allValues = resp.data.values || [];
   let headers = allValues[0] || [];
-
   const expectedHeaders = Object.keys(rowJson);
+
   if (!headers.length || headers.length !== expectedHeaders.length) {
     headers = expectedHeaders;
     await sheets.spreadsheets.values.update({
@@ -707,7 +711,7 @@ async function encodeToSheet(
     });
   }
 
-  // 3. dedupe setup
+  // Deduplication setup
   const leadIdx = headers.indexOf("lead email");
   const replyIdx = headers.indexOf("email reply");
   if (leadIdx === -1 || replyIdx === -1) {
@@ -744,42 +748,279 @@ async function encodeToSheet(
     return false;
   }
 
-  // 4. preview and confirm before appending
+  // Preview and confirm (with async timeout)
   console.log("Row to append:\n", rowJson);
 
-  const readline = require("readline").createInterface({
+  const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  const confirm = await new Promise((resolve) => {
-    readline.question("Proceed with appending this row? (y/n): ", (ans) => {
-      readline.close();
-      resolve(ans.trim().toLowerCase());
-    });
-  });
+  const confirm = await Promise.race([
+    new Promise((resolve) => {
+      rl.question("Proceed with appending this row? (y/n): ", (ans) => {
+        rl.close();
+        resolve(ans.trim().toLowerCase());
+      });
+    }),
+    (async () => {
+      await new Promise((r) => setTimeout(r, 10000));
+      rl.close();
+      console.log(
+        "\n No response after 30 seconds — running fallback before proceeding..."
+      );
+      await appendToLeadDatabase(rowJson); // ⏳ await async fallback before continuing
+      return "y";
+    })(),
+  ]);
 
   if (confirm !== "y" && confirm !== "yes") {
-    console.log(colorize(`Skipped appending to "${sheetName}"`, "yellow"));
+    console.log(`Skipped appending to "${sheetName}"`);
     return false;
   }
 
-  // append the row if confirmed
+  // Append the row
   const rowValues = headers.map((h) => rowJson[h] ?? "");
-  await sheets.spreadsheets.values.append({
+  const appendResp = await sheets.spreadsheets.values.append({
     spreadsheetId,
     range: `${sheetName}!A:A`,
     valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: [rowValues] },
   });
-  console.log(colorize(`Appended row to "${sheetName}"`, "green"));
+
+  console.log(`Appended row to "${sheetName}"`);
 
   if (typeof addToTotalEncoded === "function") {
     addToTotalEncoded(1);
   }
-  return true;
+
+  // After successful append, run async post request before ending
+  await postAfterEncoding(rowJson);
+
+  return appendResp.data ? true : false;
+  // return true;
 }
+
+// 🕒 Called when no user response within 30 seconds
+async function appendToLeadDatabase(rowJson) {
+  const query = `
+    INSERT INTO toBeEncodedLeads (
+      column_1, for_scheduling, sales_person, sales_person_email, company,
+      company_phone, phone_from_email, lead_first_name, lead_last_name,
+      lead_email, column_2, email_reply, phone_1, phone_number, phone_2,
+      address, city, state, zip, details, email_signature, linkedin_link,
+      second_contact_person_linked, status_after_call,
+      number_of_calls_spoken_with_leads, dropdown, created_at, updated_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+      $21, $22, $23, $24, $25, $26, NOW(), NOW()
+    )
+    RETURNING id;
+  `;
+
+  const values = [
+    rowJson["Column 1"] || null,
+    rowJson["For scheduling"] || null,
+    rowJson["sales person"] || null,
+    rowJson["sales person email"] || null,
+    rowJson["company"] || null,
+    rowJson["company phone#"] || null,
+    rowJson["phone#from email"] || null,
+    rowJson["lead first name"] || null,
+    rowJson["lead last name"] || null,
+    rowJson["lead email"] || null,
+    rowJson["Column 2"] || null,
+    rowJson["email reply"] || null,
+    rowJson["phone 1"] || null,
+    rowJson["#"] || null,
+    rowJson["phone2"] || null,
+    rowJson["address"] || null,
+    rowJson["city"] || null,
+    rowJson["state"] || null,
+    rowJson["zip"] || null,
+    rowJson["details"] || null,
+    rowJson["Email Signature"] || null,
+    rowJson["linkedin link"] || null,
+    rowJson["2nd contact person linked"] || null,
+    rowJson["status after the call"] || null,
+    rowJson["number of calls spoken with the leads "] || null,
+    rowJson["@dropdown"] || null,
+  ];
+
+  try {
+    const result = await con.query(query, values);
+    client.release();
+    console.log(`Lead inserted successfully with ID: ${result.rows[0].id}`);
+    return result.rows[0].id;
+  } catch (error) {
+    console.error("Error inserting lead:", error.message);
+    throw error;
+  }
+}
+
+// Called after successful encoding to sheet
+async function postAfterEncoding(rowJson) {
+  console.log("Sending POST request with encoded row data...");
+
+  const reqBody = {
+    source: "",
+    status: "",
+    name: `${rowJson["lead first name"] || ""} ${
+      rowJson["lead last name"] || ""
+    }`.trim(),
+    assigned: "",
+    client_id: "",
+    tags: [],
+    contact: `${rowJson["lead first name"] || ""} ${
+      rowJson["lead last name"] || ""
+    }`.trim(),
+    title: "",
+    email: rowJson["lead email"] || "",
+    website: rowJson.details || "",
+    phonenumber: rowJson["company phone#"] || "",
+    company: rowJson.company || "",
+    address: rowJson.address || "",
+    city: rowJson.city || "",
+    zip: rowJson.zip || "",
+    state: rowJson.state || "",
+    country: "",
+    default_language: "",
+    description: rowJson["email reply"] || "",
+    custom_contact_date: "",
+    is_public: "sheet_abcdef123456",
+  };
+
+  try {
+    const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+
+    const response = await axios.post("https://govacrm.com/api/leads", reqBody, { headers: authHeaders });
+    console.log("POST request to CRM completed:", response.status);
+  } catch (err) {
+    console.error("Failed to send POST request:", err.message);
+  }
+}
+// async function encodeToSheet(
+//   spreadsheetId,
+//   sheetName,
+//   rowJson,
+//   addToTotalEncoded
+// ) {
+//   const { sheets } = await initGoogleClients();
+
+//   // 1. ensure tab exists & headers are in row 1
+//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
+//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+//   if (!existingTabs.includes(sheetName)) {
+//     await sheets.spreadsheets.batchUpdate({
+//       spreadsheetId,
+//       requestBody: {
+//         requests: [{ addSheet: { properties: { title: sheetName } } }],
+//       },
+//     });
+
+//     const headers = Object.keys(rowJson);
+//     await sheets.spreadsheets.values.update({
+//       spreadsheetId,
+//       range: `${sheetName}!A1`,
+//       valueInputOption: "RAW",
+//       requestBody: { values: [headers] },
+//     });
+//   }
+
+//   // 2. read all existing rows
+//   const resp = await sheets.spreadsheets.values.get({
+//     spreadsheetId,
+//     range: sheetName,
+//   });
+//   const allValues = resp.data.values || [];
+//   let headers = allValues[0] || [];
+
+//   const expectedHeaders = Object.keys(rowJson);
+//   if (!headers.length || headers.length !== expectedHeaders.length) {
+//     headers = expectedHeaders;
+//     await sheets.spreadsheets.values.update({
+//       spreadsheetId,
+//       range: `${sheetName}!A1`,
+//       valueInputOption: "RAW",
+//       requestBody: { values: [headers] },
+//     });
+//   }
+
+//   // 3. dedupe setup
+//   const leadIdx = headers.indexOf("lead email");
+//   const replyIdx = headers.indexOf("email reply");
+//   if (leadIdx === -1 || replyIdx === -1) {
+//     throw new Error(
+//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
+//     );
+//   }
+
+//   const existingLeadEmails = new Set();
+//   const existingPairs = new Set();
+//   for (let i = 1; i < allValues.length; i++) {
+//     const row = allValues[i];
+//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
+//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
+//     if (leadEmail) existingLeadEmails.add(leadEmail);
+//     existingPairs.add(`${leadEmail}|${emailReply}`);
+//   }
+
+//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
+//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
+
+//   if (existingLeadEmails.has(newLeadEmail)) {
+//     console.log(
+//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
+//     );
+//     return false;
+//   }
+
+//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
+//   if (existingPairs.has(pairKey)) {
+//     console.log(
+//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+//     );
+//     return false;
+//   }
+
+//   // 4. preview and confirm before appending
+//   console.log("Row to append:\n", rowJson);
+
+//   const readline = require("readline").createInterface({
+//     input: process.stdin,
+//     output: process.stdout,
+//   });
+
+//   const confirm = await new Promise((resolve) => {
+//     readline.question("Proceed with appending this row? (y/n): ", (ans) => {
+//       readline.close();
+//       resolve(ans.trim().toLowerCase());
+//     });
+//   });
+
+//   if (confirm !== "y" && confirm !== "yes") {
+//     console.log(colorize(`Skipped appending to "${sheetName}"`, "yellow"));
+//     return false;
+//   }
+
+//   // append the row if confirmed
+//   const rowValues = headers.map((h) => rowJson[h] ?? "");
+//   await sheets.spreadsheets.values.append({
+//     spreadsheetId,
+//     range: `${sheetName}!A:A`,
+//     valueInputOption: "RAW",
+//     insertDataOption: "INSERT_ROWS",
+//     requestBody: { values: [rowValues] },
+//   });
+//   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
+
+//   if (typeof addToTotalEncoded === "function") {
+//     addToTotalEncoded(1);
+//   }
+//   return true;
+// }
 
 module.exports = {
   normalizeRow,

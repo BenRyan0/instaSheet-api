@@ -1,0 +1,23 @@
+{
+  "source": "",
+  "status": "",
+  "name": "lead first name lead last name",
+  "assigned": "",
+  "client_id": "",
+  "tags": [],
+  "contact": "lead first name lead last name",
+  "title": "",
+  "email": "lead email",
+  "website": "details",
+  "phonenumber": "company phone#",
+  "company": "company",
+  "address": "address",
+  "city": "city",
+  "zip": "zip",
+  "state": "state",
+  "country": "",
+  "default_language": "",
+  "description": "email reply",
+  "custom_contact_date": "",
+  "is_public": "sheet_abcdef123456"
+}

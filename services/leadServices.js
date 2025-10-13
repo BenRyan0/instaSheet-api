@@ -7,9 +7,6 @@ const { patterns } = require("../Filters/addressRegexConfig.json");
 const { spawn } = require("child_process");
 const { initGoogleClients } = require("../services/googleClient.js");
 
-
-
-
 const regexes = {};
 for (const [key, { pattern, flags }] of Object.entries(patterns)) {
   regexes[key] = new RegExp(pattern, flags);
@@ -26,7 +23,7 @@ async function fetchLeadsPage({
   pageLimit,
   authHeaders,
 }) {
-  console.log("FetchLeadsPage START");
+  console.log("FetchLeadsPage -init");
 
   const redisCursorKey = `insta:campaign_cursor:${campaignId}:${pageLimit}`;
   const redisFailCountKey = `insta:campaign_cursor_failcount:${campaignId}:${pageLimit}`;
@@ -69,15 +66,30 @@ async function fetchLeadsPage({
     };
 
     // Step 4: Send API request
-    const response = await axios.post(`https://api.instantly.ai/api/v2/leads/list`, body, {
-      headers: authHeaders,
-    });
-    // const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
-    //   headers: authHeaders,
-    // });
+    const response = await axios.post(
+      `https://api.instantly.ai/api/v2/leads/list`,
+      body,
+      {
+        headers: authHeaders,
+      }
+    );
 
-    console.log("Response received for campaign:", campaignId);
-    console.log(`Fetched ${response.data?.items?.length || 0} leads`);
+    // console.log("Parsed response:");
+    // console.dir(response.data, { depth: null, colors: true });
+    // console.log("Response received for campaign:", campaignId);
+    // console.log(`Fetched ${response.data?.items?.length || 0} leads`);
+
+    const leads = response.data?.items || [];
+
+    // Log each email
+   console.log(
+    colorize("Fetched Leads ...", "cyan")
+  );
+    leads.forEach((lead, index) => {
+      console.log(
+        colorize(`${index + 1}. ${lead.email}`, "cyan")
+      );
+    });
 
     // Step 5: Handle cursor logic
     if (response.data?.next_starting_after) {
@@ -99,7 +111,8 @@ async function fetchLeadsPage({
     } else {
       console.log("No new cursor returned by API — keeping current cursor.");
 
-      const failCount = (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
+      const failCount =
+        (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
 
       console.log(
@@ -122,80 +135,6 @@ async function fetchLeadsPage({
     throw error;
   }
 }
-
-
-// async function fetchLeadsPage({
-//   campaignId,
-//   cursor = null,
-//   pageLimit,
-//   authHeaders,
-// }) {
-//   console.log("FetchLeadsPage START");
-
-//   // Redis keys: main cursor + no-cursor counter
-//   const redisCursorKey = `insta:campaign_cursor:${campaignId}:${pageLimit}`;
-//   const redisFailCountKey = `insta:campaign_cursor_failcount:${campaignId}:${pageLimit}`;
-
-//   try {
-//     // Get stored cursor
-//     let storedCursor = await redisClient.get(redisCursorKey);
-//     const effectiveCursor = storedCursor || cursor || "";
-
-//     console.log(`Using cursor for campaign ${campaignId} (limit=${pageLimit}):`, effectiveCursor);
-
-//     // Prepare request body
-//     const body = {
-//       filter: "FILTER_LEAD_INTERESTED",
-//       campaign: campaignId,
-//       in_campaign: true,
-//       limit: pageLimit,
-//       starting_after: effectiveCursor,
-//     };
-
-//     // Send request
-//     const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
-//       headers: authHeaders,
-//     });
-
-//     console.log("Response received for campaign:", campaignId);
-//     console.dir(response.data, { depth: null, colors: true });
-    
-//     // Handle cursor updates
-//     if (response.data?.next_starting_after) {
-//       const newCursor = response.data.next_starting_after;
-
-//       // Update cursor + reset fail count
-//       await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // expires in 1 hour
-//       await redisClient.del(redisFailCountKey);
-
-//       console.log(`Updated Redis cursor for ${campaignId} (limit=${pageLimit}):`, newCursor);
-//     } else {
-//       console.log("No new cursor returned by API — keeping current cursor.");
-
-//       // Increment fail count
-//       const failCount = (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
-//       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 }); // expire after 2 hours
-
-//       console.log(`No-cursor streak for ${campaignId} (limit=${pageLimit}): ${failCount} time(s)`);
-
-//       // If fail count hits 3 → reset cursor
-//       if (failCount >= 3) {
-//         console.warn(`No new cursor for ${campaignId} after 3 attempts — resetting cursor.`);
-//         await redisClient.del(redisCursorKey);
-//         await redisClient.del(redisFailCountKey);
-//       }
-//     }
-
-//     console.log("FetchLeadsPage END");
-//     return response.data;
-//   } catch (error) {
-//     console.error("Error in fetchLeadsPage:", error.message);
-//     throw error;
-//   }
-// }
-
-
-
 
 function getNextCursor(apiResponse) {
   if (!Array.isArray(apiResponse) || apiResponse.length === 0) {
@@ -238,7 +177,7 @@ async function normalizeRow(emailRow) {
     "status after the call": "",
     "number of calls spoken with the leads ": "",
     "@dropdown": "",
-   };
+  };
 }
 
 async function isUSByAI({ addressText, setErrorOccurred }) {
@@ -721,7 +660,12 @@ async function isActuallyInterested(
   return ruleBasedCheck(text);
 }
 
-async function encodeToSheet(spreadsheetId, sheetName, rowJson, addToTotalEncoded) {
+async function encodeToSheet(
+  spreadsheetId,
+  sheetName,
+  rowJson,
+  addToTotalEncoded
+) {
   const { sheets } = await initGoogleClients();
 
   // 1. ensure tab exists & headers are in row 1
@@ -836,7 +780,6 @@ async function encodeToSheet(spreadsheetId, sheetName, rowJson, addToTotalEncode
   }
   return true;
 }
-
 
 module.exports = {
   normalizeRow,

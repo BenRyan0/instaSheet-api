@@ -7,11 +7,9 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const emailBodyText = email?.body?.text || "";
-  // const emailBodyText = email?.body?.text || payload.text || "";
 
-  console.log("MApToSheetRow -------------");
-  console.log(lead);
-  console.log(email);
+
+  console.log("mapToSheetRow");
 
   // If there is no email content, skip extraction entirely
   if (
@@ -37,8 +35,8 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     content_preview: email.content_preview || "",
     setErrorOccurred,
   });
-  console.log("extracted -LLM");
-  console.log(extracted);
+  // console.log("extracted -LLM");
+  // console.log(extracted);
 
   // split user_name into firstname/lastname
   let firstName = lead?.first_name || "";

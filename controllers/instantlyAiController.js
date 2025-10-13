@@ -22,7 +22,6 @@ const {
   markProcessed,
 } = require("../services/dedupService");
 const {
-  fetchRepliesForLeadsBatch,
   fetchRepliesForLead,
 } = require("../services/emailService");
 const { isInterestedReply } = require("../utils/filters");
@@ -106,9 +105,6 @@ class instantlyAiController {
     const spreadsheetId = process.env.SPREADSHEET_ID;
     try {
       const rowJson = await normalizeRow(emailRow);
-      console.log("rowJson");
-      console.log(rowJson);
-
       // --- Step 1: Address present? ---
       if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip) {
         const usAddress = await isAddressUsBased({
@@ -188,26 +184,32 @@ class instantlyAiController {
         return responseReturn(res, 400, { error: "Invalid or missing campaignId (1 campaign Id expected)" });
       }
 
-
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
       const seenMembers = await redisClient.sMembers(dedupKey);
       const seen = new Set(seenMembers);
 
+      // State initialization - for progress tracking and logging
       const state = initState({
         initialSeenCount: seen.size,
         maxEmails: opts.maxEmails,
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
       });
+      
+      // Progress imited (socket.io)
       emitProgress(state);
 
       let cursor = null;
-      // console.log(this.errorOccurred);
-      // console.log("this.errorOccurred");
+
+
+      // checking if the loop has reached its max limits
+      // Checking if error flag was set before starting main loop
       while (shouldContinue(state) && !this.errorOccurred) {
         state.nextPage();
+
+        // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
         const page = await fetchLeadsPage({
           campaignId,
           cursor,
@@ -258,10 +260,8 @@ class instantlyAiController {
 
           if (this.errorOccurred) break;
           state.nextLead();
-          i++;
           emitProgress(state);
 
-          console.log("i", i);
           // Dedup AFTER successful processing instead of before
           const emailKey = normalizeKey(lead.email || lead.lead);
           const key = emailKey || lead.id;

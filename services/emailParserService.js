@@ -1,17 +1,18 @@
 require("dotenv").config({ silent: true });
 
-function cleanEmailContent(rawEmail) {
- let cleaned = rawEmail
+function cleanEmailContent(rawEmail, maxWords = 100) {
+  let cleaned = rawEmail
     // Keep header but remove forwarded separators
-    .replace(/-{2,}Original Message-{2,}/gi, '')
-    // Remove quoted message headers (e.g., "On Thu, ... wrote:")
-    // .replace(/On\s.+wrote:/gi, '')
-    // Remove common signature closings
-    // .replace(/(?:\n|^)(With appreciation,|All the best,|Sincerely,|Regards,|Kindest regards,)\s*[\s\S]*$/gi, '')
+    // .replace(/-{2,}Original Message-{2,}/gi, '')
     // Remove email separators made of underscores or dashes
     .replace(/_{5,}|-{5,}/g, '')
     // Remove quote markers like ">", "> >", "> > >"
     .replace(/(^|\n)\s*>+\s?/g, '$1')
+    // Remove hyperlinks inside angle brackets <https://...> or <mailto:...>
+    .replace(/<https?:\/\/[^>]+>/gi, '')
+    .replace(/<mailto:[^>]+>/gi, '')
+    // Remove inline URLs like http://example.com or https://domain.biz
+    .replace(/https?:\/\/\S+/gi, '')
     // Collapse multiple newlines into a single space
     .replace(/\n+/g, ' ')
     // Remove multiple spaces
@@ -19,19 +20,32 @@ function cleanEmailContent(rawEmail) {
     // Trim leading/trailing spaces
     .trim();
 
+  // --- limit total words ---
+  const words = cleaned.split(/\s+/);
+  if (words.length > maxWords) {
+    cleaned = words.slice(0, maxWords).join(' ') + '...';
+  }
+
   return cleaned;
 }
 
-
-async function extractReply({ emailContent,content_preview, setErrorOccurred }) {
+async function extractReply({ emailContent, content_preview, setErrorOccurred }) {
   try {
-    console.log("emailContent")
-    console.log(emailContent)
-    // Clean the incoming email text
-    const cleanedContent = cleanEmailContent(emailContent);
+    console.log("emailContent");
+    console.log(emailContent);
 
-    console.log("cleanedContent")
-    console.log(cleanedContent)
+    // Check if email content has fewer than 20 words — skip cleaning if so
+    const wordCount = emailContent?.trim().split(/\s+/).length || 0;
+    let cleanedContent = emailContent;
+
+    if (wordCount >= 20) {
+      cleanedContent = cleanEmailContent(emailContent, 100);
+      console.log("cleanedContent");
+      console.log(cleanedContent);
+    } else {
+      console.log(`Skipping cleanEmailContent — only ${wordCount} words detected.`);
+    }
+
     // Skip if empty after cleaning
     if (!cleanedContent) {
       if (setErrorOccurred) setErrorOccurred(false);
@@ -41,7 +55,10 @@ async function extractReply({ emailContent,content_preview, setErrorOccurred }) 
     const response = await fetch("http://localhost:5678/webhook/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emailContent: cleanedContent, content_preview: content_preview }),
+      body: JSON.stringify({
+        emailContent: cleanedContent,
+        content_preview: content_preview,
+      }),
     });
 
     if (!response.ok) {
@@ -62,6 +79,7 @@ async function extractReply({ emailContent,content_preview, setErrorOccurred }) 
     return normalizeSchema({});
   }
 }
+
 
 /**
  * Normalizes output structure

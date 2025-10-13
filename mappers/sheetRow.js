@@ -53,10 +53,10 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   // If still missing, try from from_address_json
   if (
     (!firstName || !lastName) &&
-    Array.isArray(lead?.from_address_json) &&
-    lead.from_address_json.length > 0
+    Array.isArray(email?.from_address_json) &&
+    email.from_address_json.length > 0
   ) {
-    const fromName = lead.from_address_json[0].name || "";
+    const fromName = email.from_address_json[0].name || "";
     if (fromName) {
       const parts = fromName.trim().split(/\s+/);
       firstName = firstName || parts[0] || "";

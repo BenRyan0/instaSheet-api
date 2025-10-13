@@ -28,18 +28,38 @@ async function fetchLeadsPage({
 }) {
   console.log("FetchLeadsPage START");
 
-  // Redis keys: main cursor + no-cursor counter
   const redisCursorKey = `insta:campaign_cursor:${campaignId}:${pageLimit}`;
   const redisFailCountKey = `insta:campaign_cursor_failcount:${campaignId}:${pageLimit}`;
+  const redisMetaKey = `insta:campaign_meta`;
 
   try {
-    // Get stored cursor
+    // Step 1: Check last used campaign + pageLimit
+    const lastMeta = JSON.parse((await redisClient.get(redisMetaKey)) || "{}");
+
+    const metaChanged =
+      lastMeta.campaignId !== campaignId || lastMeta.pageLimit !== pageLimit;
+
+    if (metaChanged) {
+      console.log(
+        `Campaign/pageLimit changed: last=${JSON.stringify(
+          lastMeta
+        )}, current={campaignId:${campaignId}, pageLimit:${pageLimit}}`
+      );
+      console.log("Resetting cursor and fail count...");
+      await redisClient.del(redisCursorKey);
+      await redisClient.del(redisFailCountKey);
+    }
+
+    // Step 2: Get stored cursor (if still valid)
     let storedCursor = await redisClient.get(redisCursorKey);
     const effectiveCursor = storedCursor || cursor || "";
 
-    console.log(`Using cursor for campaign ${campaignId} (limit=${pageLimit}):`, effectiveCursor);
+    console.log(
+      `Using cursor for campaign ${campaignId} (limit=${pageLimit}):`,
+      effectiveCursor
+    );
 
-    // Prepare request body
+    // Step 3: Build request
     const body = {
       filter: "FILTER_LEAD_INTERESTED",
       campaign: campaignId,
@@ -48,35 +68,48 @@ async function fetchLeadsPage({
       starting_after: effectiveCursor,
     };
 
-    // Send request
-    const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
+    // Step 4: Send API request
+    const response = await axios.post(`https://api.instantly.ai/api/v2/leads/list`, body, {
       headers: authHeaders,
     });
+    // const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
+    //   headers: authHeaders,
+    // });
 
     console.log("Response received for campaign:", campaignId);
-    console.dir(response.data, { depth: null, colors: true });
-    
-    // Handle cursor updates
+    console.log(`Fetched ${response.data?.items?.length || 0} leads`);
+
+    // Step 5: Handle cursor logic
     if (response.data?.next_starting_after) {
       const newCursor = response.data.next_starting_after;
 
-      // Update cursor + reset fail count
-      await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // expires in 1 hour
+      await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // 1 hour expiry
       await redisClient.del(redisFailCountKey);
 
-      console.log(`Updated Redis cursor for ${campaignId} (limit=${pageLimit}):`, newCursor);
+      // Store latest campaign + pageLimit metadata
+      await redisClient.set(
+        redisMetaKey,
+        JSON.stringify({ campaignId, pageLimit }),
+        { EX: 7200 }
+      );
+
+      console.log(
+        `Updated Redis cursor for ${campaignId} (limit=${pageLimit}): ${newCursor}`
+      );
     } else {
       console.log("No new cursor returned by API — keeping current cursor.");
 
-      // Increment fail count
       const failCount = (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
-      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 }); // expire after 2 hours
+      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
 
-      console.log(`No-cursor streak for ${campaignId} (limit=${pageLimit}): ${failCount} time(s)`);
+      console.log(
+        `No-cursor streak for ${campaignId} (limit=${pageLimit}): ${failCount} time(s)`
+      );
 
-      // If fail count hits 3 → reset cursor
       if (failCount >= 3) {
-        console.warn(`No new cursor for ${campaignId} after 3 attempts — resetting cursor.`);
+        console.warn(
+          `No new cursor for ${campaignId} after 3 attempts — resetting cursor.`
+        );
         await redisClient.del(redisCursorKey);
         await redisClient.del(redisFailCountKey);
       }
@@ -99,16 +132,16 @@ async function fetchLeadsPage({
 // }) {
 //   console.log("FetchLeadsPage START");
 
-//   const redisKey = `insta:campaign_cursor:${campaignId}`;
+//   // Redis keys: main cursor + no-cursor counter
+//   const redisCursorKey = `insta:campaign_cursor:${campaignId}:${pageLimit}`;
+//   const redisFailCountKey = `insta:campaign_cursor_failcount:${campaignId}:${pageLimit}`;
 
 //   try {
-//     // Try to get existing cursor from Redis
-//     let storedCursor = await redisClient.get(redisKey);
-
-//     // Decide which cursor to use
+//     // Get stored cursor
+//     let storedCursor = await redisClient.get(redisCursorKey);
 //     const effectiveCursor = storedCursor || cursor || "";
 
-//     console.log(`Using cursor for campaign ${campaignId}:`, effectiveCursor);
+//     console.log(`Using cursor for campaign ${campaignId} (limit=${pageLimit}):`, effectiveCursor);
 
 //     // Prepare request body
 //     const body = {
@@ -119,23 +152,38 @@ async function fetchLeadsPage({
 //       starting_after: effectiveCursor,
 //     };
 
-//     // 4️⃣ Send request
+//     // Send request
 //     const response = await axios.post(`${API_BASE}${LEADS_LIST_PATH}`, body, {
 //       headers: authHeaders,
 //     });
 
-//     console.log("response.data fetchLeadsPage");
+//     console.log("Response received for campaign:", campaignId);
 //     console.dir(response.data, { depth: null, colors: true });
-
-//     // 5️⃣ Update cursor in Redis (if provided by API)
+    
+//     // Handle cursor updates
 //     if (response.data?.next_starting_after) {
-//       await redisClient.set(redisKey, response.data.next_starting_after);
-//       console.log(
-//         `Updated Redis cursor for ${campaignId}:`,
-//         response.data.next_starting_after
-//       );
+//       const newCursor = response.data.next_starting_after;
+
+//       // Update cursor + reset fail count
+//       await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // expires in 1 hour
+//       await redisClient.del(redisFailCountKey);
+
+//       console.log(`Updated Redis cursor for ${campaignId} (limit=${pageLimit}):`, newCursor);
 //     } else {
 //       console.log("No new cursor returned by API — keeping current cursor.");
+
+//       // Increment fail count
+//       const failCount = (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
+//       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 }); // expire after 2 hours
+
+//       console.log(`No-cursor streak for ${campaignId} (limit=${pageLimit}): ${failCount} time(s)`);
+
+//       // If fail count hits 3 → reset cursor
+//       if (failCount >= 3) {
+//         console.warn(`No new cursor for ${campaignId} after 3 attempts — resetting cursor.`);
+//         await redisClient.del(redisCursorKey);
+//         await redisClient.del(redisFailCountKey);
+//       }
 //     }
 
 //     console.log("FetchLeadsPage END");
@@ -145,6 +193,9 @@ async function fetchLeadsPage({
 //     throw error;
 //   }
 // }
+
+
+
 
 function getNextCursor(apiResponse) {
   if (!Array.isArray(apiResponse) || apiResponse.length === 0) {
@@ -670,117 +721,6 @@ async function isActuallyInterested(
   return ruleBasedCheck(text);
 }
 
-// async function encodeToSheet(
-//   spreadsheetId,
-//   sheetName,
-//   rowJson,
-//   addToTotalEncoded
-// ) {
-//   // initialize Sheets client
-//   const { sheets } = await initGoogleClients();
-
-//   // 1. ensure tab exists & headers are in row 1
-//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
-//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
-//   if (!existingTabs.includes(sheetName)) {
-//     // create new sheet tab
-//     await sheets.spreadsheets.batchUpdate({
-//       spreadsheetId,
-//       requestBody: {
-//         requests: [{ addSheet: { properties: { title: sheetName } } }],
-//       },
-//     });
-
-//     // write header row
-//     const headers = Object.keys(rowJson);
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
-
-//   // 2. read all existing rows
-//   const resp = await sheets.spreadsheets.values.get({
-//     spreadsheetId,
-//     range: sheetName,
-//   });
-//   const allValues = resp.data.values || [];
-//   let headers = allValues[0] || [];
-
-//   // if headers are missing or mismatched, overwrite with current rowJson keys
-//   const expectedHeaders = Object.keys(rowJson);
-//   if (!headers.length || headers.length !== expectedHeaders.length) {
-//     headers = expectedHeaders;
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
-
-//   // find indices for dedupe columns
-//   const leadIdx = headers.indexOf("lead email");
-//   const replyIdx = headers.indexOf("email reply");
-//   if (leadIdx === -1 || replyIdx === -1) {
-//     throw new Error(
-//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
-//     );
-//   }
-
-//   // build sets of existing data
-//   const existingLeadEmails = new Set();
-//   const existingPairs = new Set();
-//   for (let i = 1; i < allValues.length; i++) {
-//     const row = allValues[i];
-//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
-//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
-//     if (leadEmail) existingLeadEmails.add(leadEmail);
-//     existingPairs.add(`${leadEmail}|${emailReply}`);
-//   }
-
-//   // normalize incoming values
-//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
-//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
-
-//   // 3a. skip if this lead has already been written
-//   if (existingLeadEmails.has(newLeadEmail)) {
-//     console.log(
-//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-//     );
-//     return false;
-//   }
-
-//   // 3b. skip only if this exact lead+reply pair exists
-//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
-//   if (existingPairs.has(pairKey)) {
-//     console.log(
-//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-//     );
-//     return false;
-//   }
-
-//   // 4. append new row aligned to headers
-//   const rowValues = headers.map((h) => rowJson[h] ?? "");
-//   await sheets.spreadsheets.values.append({
-//     spreadsheetId,
-//     range: `${sheetName}!A:A`, // always start at col A
-//     valueInputOption: "RAW",
-//     insertDataOption: "INSERT_ROWS", // force append at bottom
-//     requestBody: { values: [rowValues] },
-//   });
-//   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
-
-//   // increment your counter
-//   if (typeof addToTotalEncoded === "function") {
-//     addToTotalEncoded(1);
-//   }
-
-//   return true;
-// }
-
 async function encodeToSheet(spreadsheetId, sheetName, rowJson, addToTotalEncoded) {
   const { sheets } = await initGoogleClients();
 
@@ -894,7 +834,6 @@ async function encodeToSheet(spreadsheetId, sheetName, rowJson, addToTotalEncode
   if (typeof addToTotalEncoded === "function") {
     addToTotalEncoded(1);
   }
-
   return true;
 }
 

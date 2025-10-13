@@ -184,8 +184,11 @@ class instantlyAiController {
     this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
-      console.log(req.body);
-      console.log("req.body");
+      if(!campaignId || Array.isArray(campaignId)){
+        return responseReturn(res, 400, { error: "Invalid or missing campaignId (1 campaign Id expected)" });
+      }
+
+
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;

@@ -1,15 +1,23 @@
-require("dotenv").config({ quiet: true });
 const { extractReply } = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
+require("dotenv").config({ quiet: true });
 
-async function mapToSheetRow({ lead, email, setErrorOccurred }) {
+async function mapToSheetRow({
+  lead,
+  email,
+  setErrorOccurred,
+  setErrorContext,
+}) {
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const emailBodyText = email?.body?.text || "";
 
-
-  console.log("mapToSheetRow");
+  // console.log("mapToSheetRow");
+  console.log("mapToSheetRow -lead");
+  console.log(lead);
+  console.log("mapToSheetRow -email");
+  console.log(email);
 
   // If there is no email content, skip extraction entirely
   if (
@@ -34,6 +42,7 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
     emailContent: emailBodyText || "",
     content_preview: email.content_preview || "",
     setErrorOccurred,
+    setErrorContext,
   });
   // console.log("extracted -LLM");
   // console.log(extracted);
@@ -81,7 +90,10 @@ async function mapToSheetRow({ lead, email, setErrorOccurred }) {
   let salesPersonEmail = "";
 
   // Use lead.to_address_json if available
-  if (Array.isArray(email?.to_address_json) && email.to_address_json.length > 0) {
+  if (
+    Array.isArray(email?.to_address_json) &&
+    email.to_address_json.length > 0
+  ) {
     const toAddr = email.to_address_json[0];
     salesPerson = toAddr.name || "";
     salesPersonEmail = toAddr.address || "";

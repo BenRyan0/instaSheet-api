@@ -16,8 +16,9 @@ class loggerController {
         max_emails_cap,
         max_pages_cap,
         ai_interest_threshold,
-        total_encoded
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        total_encoded,
+        error_context
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING id
     `;
 
@@ -32,6 +33,7 @@ class loggerController {
         logData.maxPagesCap,
         logData.aiInterestThreshold,
         logData.totalEncoded,
+        logData.errorContext || "",
       ];
 
       const result = await con.query(insertQuery, values);
@@ -73,7 +75,7 @@ class loggerController {
   };
 
   getAllTobeEncodedLeads = async (req, res) => {
-    console.log("GET ALL LOGS");
+    console.log("GET ALL TO BE ENCODED LEADS");
     try {
       const query = `
      SELECT *
@@ -84,7 +86,7 @@ class loggerController {
 
       const result = await con.query(query);
       //   console.log(result);
-      responseReturn(res, 200, { logs: result.rows });
+      responseReturn(res, 200, { toBeEncodedLeads: result.rows });
     } catch (err) {
       console.error("DB Fetch Error:", err);
       responseReturn(res, 500, { error: "Failed to fetch logs" });

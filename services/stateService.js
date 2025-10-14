@@ -93,7 +93,7 @@ function summarizeState(state) {
     maxPagesCap: state.maxPages,
     aiInterestThreshold: state.aiInterestThreshold,
     totalEncoded : state.totalEncoded,
-    errorMessage : state.errorMessage  | ""
+    errorContext : state.errorContext  | ""
     
   }
 }

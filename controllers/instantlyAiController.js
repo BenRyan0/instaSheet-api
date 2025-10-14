@@ -21,9 +21,7 @@ const {
   normalizeKey,
   markProcessed,
 } = require("../services/dedupService");
-const {
-  fetchRepliesForLead,
-} = require("../services/emailService");
+const { fetchRepliesForLead } = require("../services/emailService");
 const { isInterestedReply } = require("../utils/filters");
 const {
   initState,
@@ -39,6 +37,8 @@ class instantlyAiController {
   totalEncoded = 0;
   totalEnterestedLLM = 0;
   errorOccurred = false;
+  errorContext = "";
+  encodingCurrentProgress = "";
 
   // Setter for totalEncoded (overwrites)
   setTotalEncoded(val) {
@@ -50,6 +50,14 @@ class instantlyAiController {
   setErrorOccurred(val) {
     this.errorOccurred = val;
   }
+
+  setErrorContext(val) {
+    this.errorContext = val;
+  }
+  setEncodingCurrentProgress(val) {
+    this.encodingCurrentProgress = val;
+  }
+
   // Increment totalEncoded by a value (additive, does not reset)
   addToTotalEncoded(val) {
     this.totalEncoded += val;
@@ -100,19 +108,27 @@ class instantlyAiController {
     }
   };
 
-  async processEmailRow({ emailRow, sheetName }) {
+  async processEmailRow({
+    emailRow,
+    sheetName,
+    setErrorOccurred,
+    setErrorContext,
+    addToTotalEncoded,
+  }) {
     console.log(colorize("Processing lead Email ...", "blue"));
     const spreadsheetId = process.env.SPREADSHEET_ID;
     try {
       const rowJson = await normalizeRow(emailRow);
       // --- Step 1: Address present? ---
-      if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip) {
+      if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip || rowJson["company phone#"]) {
         const usAddress = await isAddressUsBased({
           city: rowJson.city,
           state: rowJson.state,
           address: rowJson.address,
           zip: rowJson.zip,
-          setErrorOccurred: this.setErrorOccurred.bind(this),
+          phone: rowJson["company phone#"],
+          setErrorOccurred,
+          setErrorContext,
         });
         if (!usAddress) return true; // Skip but still return true
 
@@ -126,7 +142,9 @@ class instantlyAiController {
             spreadsheetId,
             sheetName,
             rowJson,
-            this.addToTotalEncoded.bind(this)
+            addToTotalEncoded,
+            setErrorOccurred,
+            setErrorContext
           );
         }
         return true; // Continue flow regardless
@@ -146,7 +164,9 @@ class instantlyAiController {
             spreadsheetId,
             sheetName,
             rowJson,
-            this.addToTotalEncoded.bind(this)
+            addToTotalEncoded,
+            setErrorOccurred,
+            setErrorContext
           );
         }
         return true; // Continue flow regardless
@@ -154,6 +174,8 @@ class instantlyAiController {
 
       return true;
     } catch (err) {
+      if (setErrorOccurred) setErrorOccurred(true);
+      if (setErrorContext) setErrorContext(err.message);
       console.error("processEmailRow failed:", err.message);
       return true; // Ensure main flow continues even on error
     }
@@ -163,6 +185,7 @@ class instantlyAiController {
     try {
       console.log("STOP INCODING RUNS INITIATED");
       this.setErrorOccurred(true);
+      this.setErrorContext("Manually stopped by user");
 
       responseReturn(res, 200, {
         message: "Encoding Runs Successfuly Stopped",
@@ -180,8 +203,10 @@ class instantlyAiController {
     this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
-      if(!campaignId || Array.isArray(campaignId)){
-        return responseReturn(res, 400, { error: "Invalid or missing campaignId (1 campaign Id expected)" });
+      if (!campaignId || Array.isArray(campaignId)) {
+        return responseReturn(res, 400, {
+          error: "Invalid or missing campaignId (1 campaign Id expected)",
+        });
       }
 
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
@@ -197,12 +222,11 @@ class instantlyAiController {
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
       });
-      
+
       // Progress imited (socket.io)
       emitProgress(state);
 
       let cursor = null;
-
 
       // checking if the loop has reached its max limits
       // Checking if error flag was set before starting main loop
@@ -216,6 +240,8 @@ class instantlyAiController {
           pageLimit: opts.pageLimit,
           aiThreshold: opts.aiInterestThreshold,
           authHeaders,
+          setErrorOccurred: this.setErrorOccurred.bind(this),
+          setErrorContext: this.setErrorContext.bind(this),
         });
 
         const leads = normalizeLeadsArray(page);
@@ -232,6 +258,9 @@ class instantlyAiController {
             perLeadLimit: opts.emailsPerLead,
             authHeaders,
             delayMs: opts.delayMs,
+            setErrorOccurred: this.setErrorOccurred.bind(this),
+            setErrorContext: this.setErrorContext.bind(this),
+            is_unread: opts.is_unread,
           });
 
           // Recognize skip or error before proceeding
@@ -332,9 +361,10 @@ class instantlyAiController {
                 lead,
                 email,
                 setErrorOccurred: this.setErrorOccurred.bind(this),
+                setErrorContext: this.setErrorContext.bind(this),
               });
-              console.log("MAP TO SHEET ROW RESULT")
-              console.log(row)
+              console.log("MAP TO SHEET ROW RESULT");
+              console.log(row);
             } catch (e) {
               console.warn("mapToSheetRow failed", {
                 leadEmail: lead && (lead.email || lead.lead),
@@ -365,6 +395,9 @@ class instantlyAiController {
                 processed = await this.processEmailRow({
                   emailRow: row,
                   sheetName,
+                  addToTotalEncoded: this.addToTotalEncoded.bind(this),
+                  setErrorOccurred: this.setErrorOccurred.bind(this),
+                  setErrorContext: this.setErrorContext.bind(this),
                 });
               } catch (e) {
                 console.warn("processEmailRow threw", {
@@ -404,7 +437,7 @@ class instantlyAiController {
         if (this.errorOccurred) {
           console.log("ERR");
           state.stop();
-          state.errorMessage = "Processing aborted due to error.";
+          state.errorContext = this.errorContext;
           state.stoppedEarly = true;
           emitProgress(state);
 

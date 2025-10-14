@@ -24,10 +24,11 @@ async function _awaitRateLimit() {
   await scheduled;
 }
 
-
 async function fetchRepliesForLead(
   lead,
-  { campaignId, perLeadLimit, authHeaders, delayMs }
+  { campaignId, perLeadLimit, authHeaders, delayMs, is_unread },
+  setErrorContext,
+  setErrorOccurred
 ) {
   // Skip leads with no replies
   if (!lead.email_reply_count || lead.email_reply_count === 0) {
@@ -54,7 +55,7 @@ async function fetchRepliesForLead(
 
     // Fetch replies from Instantly API
     const response = await axios.get(
-      `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=true`,
+      `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
       {
         headers: authHeaders,
       }
@@ -65,7 +66,12 @@ async function fetchRepliesForLead(
 
     const emailWordCount = await countWords(emailContent);
     if (emailWordCount < 20) {
-      console.log(colorize(`Email for ${params.leadEmail} fetched -> ${emailWordCount} words`, "cyan"));
+      console.log(
+        colorize(
+          `Email for ${params.leadEmail} fetched -> ${emailWordCount} words`,
+          "cyan"
+        )
+      );
     }
 
     return { lead, emails, success: true };
@@ -74,12 +80,12 @@ async function fetchRepliesForLead(
       `fetchRepliesForLead ERROR for ${params.leadEmail}:`,
       err.message
     );
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(err.message);
     return { lead, emails: [], error: err.message, success: false };
   }
 }
 
-
-
 module.exports = {
-  fetchRepliesForLead
+  fetchRepliesForLead,
 };

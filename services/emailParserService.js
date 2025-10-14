@@ -5,31 +5,36 @@ function cleanEmailContent(rawEmail, maxWords = 100) {
     // Keep header but remove forwarded separators
     // .replace(/-{2,}Original Message-{2,}/gi, '')
     // Remove email separators made of underscores or dashes
-    .replace(/_{5,}|-{5,}/g, '')
+    .replace(/_{5,}|-{5,}/g, "")
     // Remove quote markers like ">", "> >", "> > >"
-    .replace(/(^|\n)\s*>+\s?/g, '$1')
+    .replace(/(^|\n)\s*>+\s?/g, "$1")
     // Remove hyperlinks inside angle brackets <https://...> or <mailto:...>
-    .replace(/<https?:\/\/[^>]+>/gi, '')
-    .replace(/<mailto:[^>]+>/gi, '')
+    .replace(/<https?:\/\/[^>]+>/gi, "")
+    .replace(/<mailto:[^>]+>/gi, "")
     // Remove inline URLs like http://example.com or https://domain.biz
-    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/https?:\/\/\S+/gi, "")
     // Collapse multiple newlines into a single space
-    .replace(/\n+/g, ' ')
+    .replace(/\n+/g, " ")
     // Remove multiple spaces
-    .replace(/\s{2,}/g, ' ')
+    .replace(/\s{2,}/g, " ")
     // Trim leading/trailing spaces
     .trim();
 
   // --- limit total words ---
   const words = cleaned.split(/\s+/);
   if (words.length > maxWords) {
-    cleaned = words.slice(0, maxWords).join(' ') + '...';
+    cleaned = words.slice(0, maxWords).join(" ") + "...";
   }
 
   return cleaned;
 }
 
-async function extractReply({ emailContent, content_preview, setErrorOccurred }) {
+async function extractReply({
+  emailContent,
+  content_preview,
+  setErrorOccurred,
+  setErrorContext,
+}) {
   try {
     console.log("emailContent");
     console.log(emailContent);
@@ -43,7 +48,9 @@ async function extractReply({ emailContent, content_preview, setErrorOccurred })
       console.log("cleanedContent");
       console.log(cleanedContent);
     } else {
-      console.log(`Skipping cleanEmailContent — only ${wordCount} words detected.`);
+      console.log(
+        `Skipping cleanEmailContent — only ${wordCount} words detected.`
+      );
     }
 
     // Skip if empty after cleaning
@@ -76,10 +83,10 @@ async function extractReply({ emailContent, content_preview, setErrorOccurred })
   } catch (err) {
     console.error("Error calling webhook:", err.message);
     if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(err.message);
     return normalizeSchema({});
   }
 }
-
 
 /**
  * Normalizes output structure

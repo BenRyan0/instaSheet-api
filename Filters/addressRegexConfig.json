@@ -23,6 +23,10 @@
     "usCities": {
       "pattern": "\\b(New York|Los Angeles|Chicago|Houston|Phoenix|Philadelphia|San Antonio|San Diego|Dallas|San Jose|Austin|Jacksonville|Fort Worth|Columbus|Charlotte|San Francisco|Indianapolis|Seattle|Denver|Washington|Boston|El Paso|Nashville|Detroit|Oklahoma City|Portland|Las Vegas|Memphis|Louisville|Baltimore|Milwaukee|Albuquerque|Tucson|Fresno|Sacramento|Kansas City|Long Beach|Mesa|Atlanta|Colorado Springs|Virginia Beach|Raleigh|Omaha|Miami|Oakland|Minneapolis|Tulsa|Wichita|New Orleans|Arlington)\\b",
       "flags": "i"
+    },
+    "phoneUsCanada": {
+      "pattern": "^(\\+1\\s?)?\\(?([2-9][0-9]{2})\\)?[\\s.-]?([2-9][0-9]{2})[\\s.-]?([0-9]{4})$",
+      "flags": ""
     }
   }
 }

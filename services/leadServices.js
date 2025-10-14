@@ -25,6 +25,8 @@ async function fetchLeadsPage({
   cursor = null,
   pageLimit,
   authHeaders,
+  setErrorContext,
+  setErrorOccurred,
 }) {
   console.log("FetchLeadsPage -init");
 
@@ -130,6 +132,8 @@ async function fetchLeadsPage({
     console.log("FetchLeadsPage END");
     return response.data;
   } catch (error) {
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(error.message);
     console.error("Error in fetchLeadsPage:", error.message);
     throw error;
   }
@@ -179,7 +183,7 @@ async function normalizeRow(emailRow) {
   };
 }
 
-async function isUSByAI({ addressText, setErrorOccurred }) {
+async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
   if (!addressText || addressText.trim() === "") return false;
 
   try {
@@ -191,7 +195,7 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.evn.LOCAL_LLM, // you can swap this with any local Ollama model
+        model: process.env.LOCAL_LLM, // you can swap this with any local Ollama model
         messages: [
           {
             role: "system",
@@ -218,7 +222,9 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
 
     if (!response.ok) {
       console.log("ERR ASKING LOCAL LLM");
-      // if (setErrorOccurred) setErrorOccurred(true); // 🚨 Non-200
+      console.log(response)
+      if (setErrorOccurred) setErrorOccurred(true); // Non-200
+      if (setErrorContext) setErrorContext(err.message);
       throw new Error(`HTTP ${response.status}`);
     }
 
@@ -231,14 +237,16 @@ async function isUSByAI({ addressText, setErrorOccurred }) {
     if (replyContent === "true") return true;
     if (replyContent === "false") return false;
 
-    // 🚨 Unexpected reply → mark error
-    // if (setErrorOccurred) setErrorOccurred(true);
+    // Unexpected reply → mark error
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(replyContent);
     console.warn("Unexpected AI response, falling back:", replyContent);
 
     return false; // fallback
   } catch (err) {
     console.error("Error classifying with AI:", err);
-    // if (setErrorOccurred) setErrorOccurred(true); // 🚨 Mark error on failure
+    if (setErrorOccurred) setErrorOccurred(true); // Mark error on failure
+    if (setErrorContext) setErrorContext(err.message);
     return false;
   }
 }
@@ -249,9 +257,11 @@ async function isAddressUsBased({
   state = "",
   zip = "",
   country = "",
+  phone = "",
   setErrorOccurred,
+  setErrorContext,
 } = {}) {
-  const fields = { address, city, state, zip, country };
+  const fields = { address, city, state, zip, country, phone };
   console.log(
     colorize("Analyzing Address if US based - Address ONLY ...", "blue")
   );
@@ -294,6 +304,12 @@ async function isAddressUsBased({
       console.log(colorize("City-State combo is US based", "green"));
       return true;
     }
+       // 6. phone number (US or Canada)
+    if (allValues.some((val) => regexes.phoneUsCanada.test(val))) {
+      const countryPrefix = val.trim().startsWith("+1") ? "US/Canada (shared +1 code)" : "Possibly US/Canada format";
+      console.log(colorize(`Phone matches ${countryPrefix}`, "green"));
+      return true;
+    }
 
     // 6. fallback: combine address + city + state
     const combined = `${address} ${city} ${state}`.trim();
@@ -311,6 +327,7 @@ async function isAddressUsBased({
     const aiResult = await isUSByAI({
       addressText: `${address} ${city} ${state} ${zip} ${country}`,
       setErrorOccurred,
+      setErrorContext,
     });
     if (aiResult) {
       console.log(colorize("AI confirmed: US based", "green"));
@@ -479,6 +496,7 @@ async function isActuallyInterested(
               "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
               "- Indicates willingness to discuss your specific funding service.",
               "- Asking for more details and questions about the offer (e.g. ,Do you fund business acquisitions?)",
+              "- Asking for a call or meeting to discuss the offer (e.g. Can we schedule a call to discuss?)",
               "",
               "Mark as FALSE if the reply:",
               "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
@@ -667,7 +685,9 @@ async function encodeToSheet(
   spreadsheetId,
   sheetName,
   rowJson,
-  addToTotalEncoded
+  addToTotalEncoded,
+  setErrorOccurred,
+  setErrorContext
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -737,7 +757,7 @@ async function encodeToSheet(
     console.log(
       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
     );
-    return false;
+     return { success: false, reason: "duplicate-lead-email" };
   }
 
   const pairKey = `${newLeadEmail}|${newEmailReply}`;
@@ -745,7 +765,7 @@ async function encodeToSheet(
     console.log(
       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
     );
-    return false;
+     return { success: false, reason: "duplicate-lead-email" };
   }
 
   // Preview and confirm (with async timeout)
@@ -756,7 +776,9 @@ async function encodeToSheet(
     output: process.stdout,
   });
 
-  const confirm = await Promise.race([
+  let confirm;
+  let fallbackTriggered = false;
+  confirm = await Promise.race([
     new Promise((resolve) => {
       rl.question("Proceed with appending this row? (y/n): ", (ans) => {
         rl.close();
@@ -769,10 +791,20 @@ async function encodeToSheet(
       console.log(
         "\n No response after 30 seconds — running fallback before proceeding..."
       );
-      await appendToLeadDatabase(rowJson); // ⏳ await async fallback before continuing
-      return "y";
+      await appendToLeadDatabase({
+        rowJson,
+        setErrorOccurred,
+        setErrorContext,
+      }); // ⏳ await async fallback before continuing
+      fallbackTriggered = true;
+      return "fallback";
     })(),
   ]);
+
+  if (fallbackTriggered) {
+    // Only append to DB, do not append to sheet or call postAfterEncoding
+    return false;
+  }
 
   if (confirm !== "y" && confirm !== "yes") {
     console.log(`Skipped appending to "${sheetName}"`);
@@ -796,14 +828,17 @@ async function encodeToSheet(
   }
 
   // After successful append, run async post request before ending
-  await postAfterEncoding(rowJson);
+  await postAfterEncoding({ rowJson, setErrorOccurred, setErrorContext });
 
   return appendResp.data ? true : false;
-  // return true;
 }
 
-// 🕒 Called when no user response within 30 seconds
-async function appendToLeadDatabase(rowJson) {
+// Called when no user response within 30 seconds
+async function appendToLeadDatabase({
+  rowJson,
+  setErrorOccurred,
+  setErrorContext,
+}) {
   const query = `
     INSERT INTO toBeEncodedLeads (
       column_1, for_scheduling, sales_person, sales_person_email, company,
@@ -851,17 +886,22 @@ async function appendToLeadDatabase(rowJson) {
 
   try {
     const result = await con.query(query, values);
-    client.release();
     console.log(`Lead inserted successfully with ID: ${result.rows[0].id}`);
     return result.rows[0].id;
   } catch (error) {
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(error.message);
     console.error("Error inserting lead:", error.message);
     throw error;
   }
 }
 
 // Called after successful encoding to sheet
-async function postAfterEncoding(rowJson) {
+async function postAfterEncoding({
+  rowJson,
+  setErrorOccurred,
+  setErrorContext,
+}) {
   console.log("Sending POST request with encoded row data...");
 
   const reqBody = {
@@ -893,135 +933,266 @@ async function postAfterEncoding(rowJson) {
   };
 
   try {
-    const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+    console.log("reqBody");
+    console.log(reqBody);
+    // const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
 
-    const response = await axios.post("https://govacrm.com/api/leads", reqBody, { headers: authHeaders });
-    console.log("POST request to CRM completed:", response.status);
+    // const response = await axios.post(
+    //   "https://govacrm.com/api/leads",
+    //   reqBody,
+    //   { headers: authHeaders }
+    // );
+    // console.log("POST request to CRM completed:", response.status);
+    // if(response.status !== 200){
+    //   if (setErrorOccurred) setErrorOccurred(true);
+    // }
+
+    return true;
   } catch (err) {
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(err.message);
     console.error("Failed to send POST request:", err.message);
   }
 }
-// async function encodeToSheet(
-//   spreadsheetId,
-//   sheetName,
-//   rowJson,
-//   addToTotalEncoded
-// ) {
-//   const { sheets } = await initGoogleClients();
 
-//   // 1. ensure tab exists & headers are in row 1
-//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
-//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
-//   if (!existingTabs.includes(sheetName)) {
-//     await sheets.spreadsheets.batchUpdate({
-//       spreadsheetId,
-//       requestBody: {
-//         requests: [{ addSheet: { properties: { title: sheetName } } }],
-//       },
-//     });
+function normalizeLeadData(leadData, context = {}) {
+  const {
+    processEnvAgent = process.env.AGENT_NAME || "instaSheet agent x1",
+    salesPerson,
+    salesPersonEmail,
+    extracted = {},
+    payload = {},
+    phone1,
+    phone2,
+    phoneFromEmail,
+    firstName,
+    lastName,
+    leadEmail,
+    emailSignature,
+    lead = {},
+  } = context;
 
-//     const headers = Object.keys(rowJson);
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
+  //Determine if input is from DB (snake_case) or req.body (camelCase)
+  const isFromDB = Object.keys(leadData).some((key) => key.includes("_"));
 
-//   // 2. read all existing rows
-//   const resp = await sheets.spreadsheets.values.get({
-//     spreadsheetId,
-//     range: sheetName,
-//   });
-//   const allValues = resp.data.values || [];
-//   let headers = allValues[0] || [];
+  if (isFromDB) {
+    // Normalize DB record → Sheet structure
+    return {
+      "Column 1": leadData.column_1 || processEnvAgent,
+      "For scheduling": leadData.for_scheduling || "",
+      "sales person": leadData.sales_person || "",
+      "sales person email": leadData.sales_person_email || "",
+      company: leadData.company || "",
+      "company phone#": leadData.company_phone || "none",
+      "phone#from email": leadData.phone_from_email || "none",
+      "lead first name": leadData.lead_first_name || "",
+      "lead last name": leadData.lead_last_name || "",
+      "lead email": leadData.lead_email || "",
+      "Column 2": leadData.column_2 || leadData.lead_email || "",
+      "email reply": leadData.email_reply || "",
+      "phone 1": leadData.phone_1 || "",
+      "#": leadData.phone_number || leadData.phone_1 || "",
+      phone2: leadData.phone_2 || "",
+      address: leadData.address || "",
+      city: leadData.city || "",
+      state: leadData.state || "",
+      zip: leadData.zip || "",
+      details: leadData.details || "",
+      "Email Signature": leadData.email_signature || "",
+      "linkedin link": leadData.linkedin_link || "none",
+      "2nd contact person linked":
+        leadData.second_contact_person_linked || "none",
+      "status after the call": leadData.status_after_call || "none",
+      "number of calls spoken with the leads":
+        leadData.number_of_calls_spoken_with_leads || "",
+      "@dropdown": leadData.dropdown || "",
+    };
+  } else {
+    // Normalize direct payload (req.body → Sheet structure)
+    return {
+      "Column 1": processEnvAgent,
+      "For scheduling": "",
+      "sales person": salesPerson || "",
+      "sales person email": salesPersonEmail || "",
+      company: lead?.company_name || lead?.company || "",
+      "company phone#": lead?.phone || "none",
+      "phone#from email": phoneFromEmail || "none",
+      "lead first name": firstName || "",
+      "lead last name": lastName || "",
+      "lead email": leadEmail,
+      "Column 2": leadEmail,
+      "email reply": extracted.reply || "",
+      "phone 1": phone1 || "",
+      "#": phone1 || "",
+      phone2: phone2 || "",
+      address: payload.address || lead?.address || "",
+      city: payload.city || lead?.city || "",
+      state: payload.state || lead?.state || payload.organization_state || "",
+      zip:
+        payload.zip ||
+        payload.zip_code ||
+        payload.organization_postal_code ||
+        "",
+      details: payload.details || lead?.details || lead?.website || "",
+      "Email Signature": extracted.signature || emailSignature || "",
+      "linkedin link": "none",
+      "2nd contact person linked": "none",
+      "status after the call": "none",
+      "number of calls spoken with the leads": "",
+      "@dropdown": "",
+    };
+  }
+}
 
-//   const expectedHeaders = Object.keys(rowJson);
-//   if (!headers.length || headers.length !== expectedHeaders.length) {
-//     headers = expectedHeaders;
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
+async function encodeLeadFromRequest({
+  spreadsheetId,
+  sheetName,
+  leadData, // from req.body.lead
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  try {
+    const { sheets } = await initGoogleClients();
 
-//   // 3. dedupe setup
-//   const leadIdx = headers.indexOf("lead email");
-//   const replyIdx = headers.indexOf("email reply");
-//   if (leadIdx === -1 || replyIdx === -1) {
-//     throw new Error(
-//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
-//     );
-//   }
+    // 1️⃣ Ensure tab exists
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const existingTabs = meta.data.sheets.map((s) => s.properties.title);
 
-//   const existingLeadEmails = new Set();
-//   const existingPairs = new Set();
-//   for (let i = 1; i < allValues.length; i++) {
-//     const row = allValues[i];
-//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
-//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
-//     if (leadEmail) existingLeadEmails.add(leadEmail);
-//     existingPairs.add(`${leadEmail}|${emailReply}`);
-//   }
+    if (!existingTabs.includes(sheetName)) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{ addSheet: { properties: { title: sheetName } } }],
+        },
+      });
+      console.log(`Created new sheet tab: ${sheetName}`);
+    }
 
-//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
-//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
+    // 2️⃣ Construct your rowJson from the incoming leadData
+    const rowJson = {
+      "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
+      "For scheduling": leadData.for_scheduling || "",
+      "sales person": leadData.sales_person || "",
+      "sales person email": leadData.sales_person_email || "",
+      company: leadData.company || "",
+      "company phone#": leadData.company_phone || "none",
+      "phone#from email": leadData.phone_from_email || "none",
+      "lead first name": leadData.lead_first_name || "",
+      "lead last name": leadData.lead_last_name || "",
+      "lead email": leadData.lead_email || "",
+      "Column 2": leadData.lead_email || "",
+      "email reply": leadData.email_reply || "",
+      "phone 1": leadData.phone_1 || "",
+      "#": leadData.phone_number || leadData.phone_1 || "",
+      phone2: leadData.phone_2 || "",
+      address: leadData.address || "",
+      city: leadData.city || "",
+      state: leadData.state || "",
+      zip: leadData.zip || "",
+      details: leadData.details || "",
+      "Email Signature": leadData.email_signature || "",
+      "linkedin link": leadData.linkedin_link || "none",
+      "2nd contact person linked":
+        leadData.second_contact_person_linked || "none",
+      "status after the call": leadData.status_after_call || "none",
+      "number of calls spoken with the leads":
+        leadData.number_of_calls_spoken_with_leads || "",
+      "@dropdown": leadData.dropdown || "",
+    };
 
-//   if (existingLeadEmails.has(newLeadEmail)) {
-//     console.log(
-//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-//     );
-//     return false;
-//   }
+    // 3️⃣ Get existing rows
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: sheetName,
+    });
 
-//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
-//   if (existingPairs.has(pairKey)) {
-//     console.log(
-//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-//     );
-//     return false;
-//   }
+    const allValues = resp.data.values || [];
+    let headers = allValues[0] || [];
+    const expectedHeaders = Object.keys(rowJson);
 
-//   // 4. preview and confirm before appending
-//   console.log("Row to append:\n", rowJson);
+    // If headers missing or mismatched, reset headers
+    if (!headers.length || headers.length !== expectedHeaders.length) {
+      headers = expectedHeaders;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${sheetName}!A1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [headers] },
+      });
+      console.log("Added or corrected headers in sheet.");
+    }
 
-//   const readline = require("readline").createInterface({
-//     input: process.stdin,
-//     output: process.stdout,
-//   });
+    // 4️⃣ Deduplication logic
+    const leadIdx = headers.indexOf("lead email");
+    const replyIdx = headers.indexOf("email reply");
 
-//   const confirm = await new Promise((resolve) => {
-//     readline.question("Proceed with appending this row? (y/n): ", (ans) => {
-//       readline.close();
-//       resolve(ans.trim().toLowerCase());
-//     });
-//   });
+    if (leadIdx === -1 || replyIdx === -1) {
+      throw new Error(
+        `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
+      );
+    }
 
-//   if (confirm !== "y" && confirm !== "yes") {
-//     console.log(colorize(`Skipped appending to "${sheetName}"`, "yellow"));
-//     return false;
-//   }
+    const existingLeadEmails = new Set();
+    const existingPairs = new Set();
 
-//   // append the row if confirmed
-//   const rowValues = headers.map((h) => rowJson[h] ?? "");
-//   await sheets.spreadsheets.values.append({
-//     spreadsheetId,
-//     range: `${sheetName}!A:A`,
-//     valueInputOption: "RAW",
-//     insertDataOption: "INSERT_ROWS",
-//     requestBody: { values: [rowValues] },
-//   });
-//   console.log(colorize(`Appended row to "${sheetName}"`, "green"));
+    for (let i = 1; i < allValues.length; i++) {
+      const row = allValues[i];
+      const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
+      const emailReply = (row[replyIdx] || "").toLowerCase().trim();
+      if (leadEmail) existingLeadEmails.add(leadEmail);
+      existingPairs.add(`${leadEmail}|${emailReply}`);
+    }
 
-//   if (typeof addToTotalEncoded === "function") {
-//     addToTotalEncoded(1);
-//   }
-//   return true;
-// }
+    const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
+    const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
+    if (existingLeadEmails.has(newLeadEmail)) {
+      console.log(
+        `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
+      );
+      return { success: false, reason: "duplicate-lead-email" };
+    }
+
+    const pairKey = `${newLeadEmail}|${newEmailReply}`;
+    if (existingPairs.has(pairKey)) {
+      console.log(
+        `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+      );
+      return { success: false, reason: "duplicate-lead+reply" };
+    }
+
+    // 5️⃣ Append row to Google Sheet
+    const rowValues = headers.map((h) => rowJson[h] ?? "");
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${sheetName}!A:A`,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [rowValues] },
+    });
+
+    console.log("✅ Lead successfully appended to Google Sheet.");
+
+    // 6️⃣ Mark as done in DB (optional)
+    if (leadData.id) {
+      await con.query(
+        `UPDATE toBeEncodedLeads SET isDone = true WHERE id = $1`,
+        [leadData.id]
+      );
+      console.log(`Lead ID ${leadData.id} marked as done.`);
+    }
+
+    // 7️⃣ Call postAfterEncoding
+    await postAfterEncoding({ rowJson, setErrorOccurred, setErrorContext });
+
+    return { success: true };
+  } catch (error) {
+    console.error("❌ Error encoding lead:", error.message);
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(error.message);
+    return { success: false, error: error.message };
+  }
+}
 module.exports = {
   normalizeRow,
   isAddressUsBased,
@@ -1031,4 +1202,5 @@ module.exports = {
   FILTER_LEAD_INTERESTED_BASE,
   fetchLeadsPage,
   getNextCursor,
+  encodeLeadFromRequest,
 };

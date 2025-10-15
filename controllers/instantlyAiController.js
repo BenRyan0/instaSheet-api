@@ -111,16 +111,25 @@ class instantlyAiController {
   async processEmailRow({
     emailRow,
     sheetName,
+    additionalContext,
     setErrorOccurred,
     setErrorContext,
     addToTotalEncoded,
   }) {
     console.log(colorize("Processing lead Email ...", "blue"));
+    console.log("additionalContext");
+    console.log(additionalContext);
     const spreadsheetId = process.env.SPREADSHEET_ID;
     try {
       const rowJson = await normalizeRow(emailRow);
       // --- Step 1: Address present? ---
-      if (rowJson.address || rowJson.city || rowJson.state || rowJson.zip || rowJson["company phone#"]) {
+      if (
+        rowJson.address ||
+        rowJson.city ||
+        rowJson.state ||
+        rowJson.zip ||
+        rowJson["company phone#"]
+      ) {
         const usAddress = await isAddressUsBased({
           city: rowJson.city,
           state: rowJson.state,
@@ -142,6 +151,7 @@ class instantlyAiController {
             spreadsheetId,
             sheetName,
             rowJson,
+            additionalContext,
             addToTotalEncoded,
             setErrorOccurred,
             setErrorContext
@@ -164,6 +174,7 @@ class instantlyAiController {
             spreadsheetId,
             sheetName,
             rowJson,
+            additionalContext,
             addToTotalEncoded,
             setErrorOccurred,
             setErrorContext
@@ -340,7 +351,16 @@ class instantlyAiController {
             }
 
             let row;
+            let additionalContext = {};
             try {
+              // Add contextual info
+              // the ClientId and Category to be placed in the tags
+              additionalContext = {
+                ClientID: lead?.id ?? "N/A",
+                Category:
+                  lead?.payload?.category ?? lead?.category ?? "Uncategorized",
+              };
+
               if (
                 !email.content_preview ||
                 email.content_preview.trim() === ""
@@ -395,6 +415,7 @@ class instantlyAiController {
                 processed = await this.processEmailRow({
                   emailRow: row,
                   sheetName,
+                  additionalContext,
                   addToTotalEncoded: this.addToTotalEncoded.bind(this),
                   setErrorOccurred: this.setErrorOccurred.bind(this),
                   setErrorContext: this.setErrorContext.bind(this),

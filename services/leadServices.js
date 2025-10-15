@@ -222,7 +222,7 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
 
     if (!response.ok) {
       console.log("ERR ASKING LOCAL LLM");
-      console.log(response)
+      console.log(response);
       if (setErrorOccurred) setErrorOccurred(true); // Non-200
       if (setErrorContext) setErrorContext(err.message);
       throw new Error(`HTTP ${response.status}`);
@@ -304,9 +304,11 @@ async function isAddressUsBased({
       console.log(colorize("City-State combo is US based", "green"));
       return true;
     }
-       // 6. phone number (US or Canada)
+    // 6. phone number (US or Canada)
     if (allValues.some((val) => regexes.phoneUsCanada.test(val))) {
-      const countryPrefix = val.trim().startsWith("+1") ? "US/Canada (shared +1 code)" : "Possibly US/Canada format";
+      const countryPrefix = val.trim().startsWith("+1")
+        ? "US/Canada (shared +1 code)"
+        : "Possibly US/Canada format";
       console.log(colorize(`Phone matches ${countryPrefix}`, "green"));
       return true;
     }
@@ -685,6 +687,7 @@ async function encodeToSheet(
   spreadsheetId,
   sheetName,
   rowJson,
+  additionalContext,
   addToTotalEncoded,
   setErrorOccurred,
   setErrorContext
@@ -694,6 +697,10 @@ async function encodeToSheet(
   // Ensure tab exists and headers are in row 1
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+  const targetSheet = meta.data.sheets.find(
+    (s) => s.properties.title === sheetName
+  );
+
   if (!existingTabs.includes(sheetName)) {
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -710,6 +717,13 @@ async function encodeToSheet(
       requestBody: { values: [headers] },
     });
   }
+
+  // Target Shhet
+  if (!targetSheet) {
+    throw new Error(`Sheet "${sheetName}" not found`);
+  }
+
+  const sheetId = targetSheet.properties.sheetId;
 
   // Read all existing rows
   const resp = await sheets.spreadsheets.values.get({
@@ -757,7 +771,7 @@ async function encodeToSheet(
     console.log(
       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
     );
-     return { success: false, reason: "duplicate-lead-email" };
+    return { success: false, reason: "duplicate-lead-email" };
   }
 
   const pairKey = `${newLeadEmail}|${newEmailReply}`;
@@ -765,7 +779,7 @@ async function encodeToSheet(
     console.log(
       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
     );
-     return { success: false, reason: "duplicate-lead-email" };
+    return { success: false, reason: "duplicate-lead-email" };
   }
 
   // Preview and confirm (with async timeout)
@@ -793,9 +807,10 @@ async function encodeToSheet(
       );
       await appendToLeadDatabase({
         rowJson,
+        additionalContext,
         setErrorOccurred,
         setErrorContext,
-      }); // ⏳ await async fallback before continuing
+      }); // await async fallback before continuing
       fallbackTriggered = true;
       return "fallback";
     })(),
@@ -827,8 +842,17 @@ async function encodeToSheet(
     addToTotalEncoded(1);
   }
 
+  const nextRow = allValues.length + 1; // calculate before appending if needed
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
+
   // After successful append, run async post request before ending
-  await postAfterEncoding({ rowJson, setErrorOccurred, setErrorContext });
+  await postAfterEncoding({
+    rowJson,
+    sheetUrl,
+    additionalContext,
+    setErrorOccurred,
+    setErrorContext,
+  });
 
   return appendResp.data ? true : false;
 }
@@ -838,6 +862,7 @@ async function appendToLeadDatabase({
   rowJson,
   setErrorOccurred,
   setErrorContext,
+  additionalContext,
 }) {
   const query = `
     INSERT INTO toBeEncodedLeads (
@@ -846,7 +871,7 @@ async function appendToLeadDatabase({
       lead_email, column_2, email_reply, phone_1, phone_number, phone_2,
       address, city, state, zip, details, email_signature, linkedin_link,
       second_contact_person_linked, status_after_call,
-      number_of_calls_spoken_with_leads, dropdown, created_at, updated_at
+      number_of_calls_spoken_with_leads, dropdown, clientid, tags, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
@@ -882,6 +907,8 @@ async function appendToLeadDatabase({
     rowJson["status after the call"] || null,
     rowJson["number of calls spoken with the leads "] || null,
     rowJson["@dropdown"] || null,
+    additionalContext.ClientID || null,
+    additionalContext.Category || null,
   ];
 
   try {
@@ -899,10 +926,18 @@ async function appendToLeadDatabase({
 // Called after successful encoding to sheet
 async function postAfterEncoding({
   rowJson,
+  sheetUrl,
+  additionalContext,
   setErrorOccurred,
   setErrorContext,
 }) {
   console.log("Sending POST request with encoded row data...");
+
+  // Build tags array dynamically
+  const tags = [];
+  if (additionalContext?.Category) {
+    tags.push(additionalContext.Category);
+  }
 
   const reqBody = {
     source: "",
@@ -911,11 +946,8 @@ async function postAfterEncoding({
       rowJson["lead last name"] || ""
     }`.trim(),
     assigned: "",
-    client_id: "",
-    tags: [],
-    contact: `${rowJson["lead first name"] || ""} ${
-      rowJson["lead last name"] || ""
-    }`.trim(),
+    client_id: additionalContext.ClientID || "",
+    tags,
     title: "",
     email: rowJson["lead email"] || "",
     website: rowJson.details || "",
@@ -929,31 +961,118 @@ async function postAfterEncoding({
     default_language: "",
     description: rowJson["email reply"] || "",
     custom_contact_date: "",
-    is_public: "sheet_abcdef123456",
+    is_public: sheetUrl || "",
   };
 
-  try {
-    console.log("reqBody");
-    console.log(reqBody);
-    // const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+  const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
 
-    // const response = await axios.post(
-    //   "https://govacrm.com/api/leads",
-    //   reqBody,
-    //   { headers: authHeaders }
-    // );
-    // console.log("POST request to CRM completed:", response.status);
-    // if(response.status !== 200){
-    //   if (setErrorOccurred) setErrorOccurred(true);
-    // }
+  let attempts = 0;
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
 
-    return true;
-  } catch (err) {
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(err.message);
-    console.error("Failed to send POST request:", err.message);
+  while (attempts < maxRetries) {
+    try {
+      const response = await axios.post(
+        "https://govacrm.com/api/leads",
+        reqBody,
+        { headers: authHeaders }
+      );
+
+      console.log("POST request to CRM completed:", response.status);
+
+      if (response.status === 200) {
+        return true; // Success, stop retrying
+      } else {
+        throw new Error(`Unexpected status code: ${response.status}`);
+      }
+
+    } catch (err) {
+      attempts++;
+      console.error(
+        `Attempt ${attempts} failed: ${err.message}${
+          attempts < maxRetries ? " — retrying..." : ""
+        }`
+      );
+
+      if (attempts >= maxRetries) {
+        if (setErrorOccurred) setErrorOccurred(true);
+        if (setErrorContext) setErrorContext(err.message);
+        console.error("All retry attempts failed.");
+        return false;
+      }
+
+      // Wait before retrying (exponential backoff)
+      const delay = baseDelay * Math.pow(2, attempts - 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 }
+
+// async function postAfterEncoding({
+//   rowJson,
+//   sheetUrl,
+//   additionalContext,
+//   setErrorOccurred,
+//   setErrorContext,
+// }) {
+//   console.log("Sending POST request with encoded row data...");
+
+//     // Build tags array dynamically
+//   const tags = [];
+
+//   // Add category tag if available
+//   if (additionalContext?.Category) {
+//     tags.push(additionalContext.Category);
+//   }
+
+
+
+//   const reqBody = {
+//     source: "",
+//     status: "",
+//     name: `${rowJson["lead first name"] || ""} ${
+//       rowJson["lead last name"] || ""
+//     }`.trim(),
+//     assigned: "",
+//     client_id: additionalContext.ClientID || "",
+//     tags,
+//     title: "",
+//     email: rowJson["lead email"] || "",
+//     website: rowJson.details || "",
+//     phonenumber: rowJson["company phone#"] || "",
+//     company: rowJson.company || "",
+//     address: rowJson.address || "",
+//     city: rowJson.city || "",
+//     zip: rowJson.zip || "",
+//     state: rowJson.state || "",
+//     country: "",
+//     default_language: "",
+//     description: rowJson["email reply"] || "",
+//     custom_contact_date: "",
+//     is_public: sheetUrl || "",
+//   };
+
+//   try {
+
+//     const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+
+//     const response = await axios.post(
+//       "https://govacrm.com/api/leads",
+//       reqBody,
+//       { headers: authHeaders }
+//     );
+//     console.log("POST request to CRM completed:", response.status);
+//     if(response.status !== 200){
+//       if (setErrorOccurred) setErrorOccurred(true);
+//     }
+
+//     return true;
+//   } catch (err) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     console.error("Failed to send POST request:", err.message);
+//   }
+// }
 
 function normalizeLeadData(leadData, context = {}) {
   const {
@@ -1054,7 +1173,7 @@ async function encodeLeadFromRequest({
   try {
     const { sheets } = await initGoogleClients();
 
-    // 1️⃣ Ensure tab exists
+    // 1 Ensure tab exists
     const meta = await sheets.spreadsheets.get({ spreadsheetId });
     const existingTabs = meta.data.sheets.map((s) => s.properties.title);
 
@@ -1068,7 +1187,7 @@ async function encodeLeadFromRequest({
       console.log(`Created new sheet tab: ${sheetName}`);
     }
 
-    // 2️⃣ Construct your rowJson from the incoming leadData
+    // 2️ Construct your rowJson from the incoming leadData
     const rowJson = {
       "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
       "For scheduling": leadData.for_scheduling || "",
@@ -1100,7 +1219,7 @@ async function encodeLeadFromRequest({
       "@dropdown": leadData.dropdown || "",
     };
 
-    // 3️⃣ Get existing rows
+    // 3️ Get existing rows
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: sheetName,
@@ -1122,7 +1241,7 @@ async function encodeLeadFromRequest({
       console.log("Added or corrected headers in sheet.");
     }
 
-    // 4️⃣ Deduplication logic
+    // 4️ Deduplication logic
     const leadIdx = headers.indexOf("lead email");
     const replyIdx = headers.indexOf("email reply");
 

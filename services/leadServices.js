@@ -441,30 +441,39 @@ function ruleBasedCheck(text) {
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
-  useLocal = false
+  useLocal = false,
+  keyIndex = 0 // added: track which API key to use
 ) {
-  // 1. Guard & normalize
   if (!emailReply || typeof emailReply !== "string") {
     return false;
   }
 
   const text = normalize(emailReply);
 
-  // 2. Try the LLM classification
   const controller = new AbortController();
   let timeoutId;
 
   try {
     timeoutId = setTimeout(() => controller.abort(), 90000);
 
+    // --- Select base URL + headers ---
     const url = useLocal
       ? "http://localhost:11434/api/chat"
       : "https://openrouter.ai/api/v1/chat/completions";
 
+    // --- Cycle through keys ---
+    const apiKeys = [
+      process.env.OPENROUTER_API_KEY,
+      process.env.OPENROUTER_API_KEY2,
+      process.env.OPENROUTER_API_KEY3,
+    ].filter(Boolean); // remove undefined ones
+
+    const currentKey = apiKeys[keyIndex % apiKeys.length];
+
     const headers = useLocal
       ? { "Content-Type": "application/json" }
       : {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
+          Authorization: `Bearer ${currentKey}`,
           "Content-Type": "application/json",
         };
 
@@ -472,7 +481,7 @@ async function isActuallyInterested(
       ? process.env.LOCAL_LLM
       : process.env.OPEN_ROUTER_MODEL2;
 
-    console.log(`model OPENROUTER_API_SEC_KEY : ${model}`);
+    console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
 
     const resp = await fetch(url, {
       method: "POST",
@@ -498,17 +507,16 @@ async function isActuallyInterested(
               "- Asks for details, requirements, terms, next steps, or timing of funding.",
               "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
               "- Indicates willingness to discuss your specific funding service.",
-              "- Asking for more details and questions about the offer (e.g. ,Do you fund business acquisitions?)",
-              "- Asking for a call or meeting to discuss the offer (e.g. Can we schedule a call to discuss?)",
+              "- Asking for more details or a meeting to discuss the offer.",
               "",
               "Mark as FALSE if the reply:",
               "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
-              "- Expresses interest in something different from what is offered (e.g., only grants, loans, investments, or donations).",
-              "- Is neutral, generic, or automated (e.g., 'Thanks', 'Received', 'Got it').",
-              "- Contains conditions that exclude your type of offer (e.g., 'only interested in grants' or 'not open to funding').",
+              "- Expresses interest in something different (e.g., grants, loans, donations).",
+              "- Is neutral or automated (e.g., 'Thanks', 'Received').",
+              "- Excludes your offer (e.g., 'only interested in grants').",
               "",
-              "Respond with exactly one word — 'true' or 'false' — in lowercase. No punctuation or explanation.",
-            ].join("\\n"),
+              "Respond with exactly one word — 'true' or 'false' — in lowercase.",
+            ].join("\n"),
           },
           { role: "user", content: text },
         ],
@@ -516,46 +524,64 @@ async function isActuallyInterested(
       }),
     });
 
-    console.log("RESPONSE IN ISACTUALLYINTERESTED");
-    console.log(resp);
+    console.log("RESPONSE IN ISACTUALLYINTERESTED:", resp.status);
 
+    // --- Handle HTTP errors ---
     if (!resp.ok) {
       console.error("LLM ERROR isActuallyInterested:", resp.status);
-      // if (setErrorOccurred) setErrorOccurred(true);
-      // throw new Error(`HTTP ${resp.status}`);
+
+      // 🧠 Rate-limit detected → retry with next API key
+      if (resp.status === 429) {
+        if (keyIndex < apiKeys.length - 1) {
+          console.warn(
+            `Rate limited on API key #${keyIndex + 1}. Retrying with next key...`
+          );
+          return await isActuallyInterested(
+            emailReply,
+            addTotalInterestedLLM,
+            useLocal,
+            keyIndex + 1
+          );
+        } else {
+          console.error(
+            "All OpenRouter API keys exhausted — switching to local model."
+          );
+          return await isActuallyInterested(
+            emailReply,
+            addTotalInterestedLLM,
+            true // useLocal
+          );
+        }
+      }
+
+      return ruleBasedCheck(text);
     }
 
-    // --- Handle local NDJSON vs OpenRouter JSON ---
+    // --- Handle JSON responses ---
     let modelOut = "";
-
     if (useLocal) {
-      // NDJSON stream parsing
       const raw = await resp.text();
       const lines = raw
         .split("\n")
         .map((l) => l.trim())
         .filter((l) => l.length > 0);
-
       let lastValid = null;
       for (let line of lines) {
         try {
           const obj = JSON.parse(line);
           if (obj?.message?.content) {
             lastValid = obj.message.content.trim();
-            if (lastValid) break; // take the first non-empty response
+            if (lastValid) break;
           }
         } catch (e) {
           console.warn("Skipping bad NDJSON line:", line);
         }
       }
-
       modelOut = (lastValid || "").toLowerCase();
       console.log("Parsed NDJSON modelOut:", modelOut);
     } else {
-      // OpenRouter JSON
       const json = await resp.json();
       console.log("Parsed OpenRouter JSON:", json);
-
       modelOut =
         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
@@ -564,7 +590,6 @@ async function isActuallyInterested(
     }
 
     // --- Interpret model output ---
-    // Handle extra artifacts like "false<|begin_of_sentence|>" by sanitizing
     const tokenMatch = (modelOut.match(
       /\b(true|false|yes|no|interested|not interested)\b/i
     ) || [])[1];
@@ -591,98 +616,262 @@ async function isActuallyInterested(
     }
 
     console.warn("LLM gave unexpected output, falling back:", modelOut);
-
-    // If OpenRouter response is unclear and we are not using local, attempt a local LLM fallback
-    if (!useLocal) {
-      try {
-        const localController = new AbortController();
-        const localTimeout = setTimeout(() => localController.abort(), 30000);
-
-        const localResp = await fetch("http://localhost:11434/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: localController.signal,
-          body: JSON.stringify({
-            model: process.env.LOCAL_LLM,
-            messages: [
-              {
-                role: "system",
-                content: [
-                  "Classify whether the following email reply from a prospect shows genuine interest",
-                  "—asking for pricing, next steps, scheduling, or more info.",
-                  "Ignore promotional pitches and auto-replies.",
-                  'Answer strictly "true" or "false".',
-                ].join("\n"),
-              },
-              { role: "user", content: text },
-            ],
-            temperature: 0,
-            stream: false,
-          }),
-        });
-
-        clearTimeout(localTimeout);
-
-        if (localResp.ok) {
-          // Some local servers return JSON, others NDJSON; try JSON first
-          let localOut = "";
-          try {
-            const localJson = await localResp.json();
-            localOut = (localJson.message?.content || "").toLowerCase().trim();
-          } catch (_) {
-            const raw = await localResp.text();
-            const lines = raw
-              .split("\n")
-              .map((l) => l.trim())
-              .filter((l) => l.length > 0);
-            let lastValid = null;
-            for (let line of lines) {
-              try {
-                const obj = JSON.parse(line);
-                if (obj?.message?.content) {
-                  lastValid = obj.message.content.trim();
-                  if (lastValid) break;
-                }
-              } catch (e) {
-                // ignore bad lines
-              }
-            }
-            localOut = (lastValid || "").toLowerCase();
-          }
-
-          const localToken = (localOut.match(/\b(true|false)\b/i) || [])[1];
-          const localNorm = (localToken || localOut)
-            .toString()
-            .toLowerCase()
-            .trim();
-
-          if (localNorm === "true") {
-            if (typeof addTotalInterestedLLM === "function")
-              addTotalInterestedLLM(1);
-            return true;
-          }
-          if (localNorm === "false") {
-            return false;
-          }
-        }
-      } catch (fallbackErr) {
-        console.warn(
-          "Local fallback failed:",
-          fallbackErr && fallbackErr.message
-        );
-      }
-    }
-    // if (setErrorOccurred) setErrorOccurred(true);
   } catch (err) {
     console.error("LLM classification error:", err);
-    // if (setErrorOccurred) setErrorOccurred(true);
   } finally {
     clearTimeout(timeoutId);
   }
 
-  // 3. Fallback to local filters if LLM fails
+  // Fallback to rule-based check if all else fails
   return ruleBasedCheck(text);
 }
+
+
+// async function isActuallyInterested(
+//   emailReply,
+//   addTotalInterestedLLM,
+//   useLocal = false
+// ) {
+//   // 1. Guard & normalize
+//   if (!emailReply || typeof emailReply !== "string") {
+//     return false;
+//   }
+
+//   const text = normalize(emailReply);
+
+//   // 2. Try the LLM classification
+//   const controller = new AbortController();
+//   let timeoutId;
+
+//   try {
+//     timeoutId = setTimeout(() => controller.abort(), 90000);
+
+//     const url = useLocal
+//       ? "http://localhost:11434/api/chat"
+//       : "https://openrouter.ai/api/v1/chat/completions";
+
+//     const headers = useLocal
+//       ? { "Content-Type": "application/json" }
+//       : {
+//           Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
+//           "Content-Type": "application/json",
+//         };
+
+//     const model = useLocal
+//       ? process.env.LOCAL_LLM
+//       : process.env.OPEN_ROUTER_MODEL2;
+
+//     console.log(`model OPENROUTER_API_SEC_KEY : ${model}`);
+
+//     const resp = await fetch(url, {
+//       method: "POST",
+//       headers,
+//       signal: controller.signal,
+//       body: JSON.stringify({
+//         model,
+//         messages: [
+//           {
+//             role: "system",
+//             content: [
+//               "You are an assistant that classifies whether a prospect's email reply shows genuine business interest in the offered service.",
+//               "",
+//               "SERVICES OFFERED:",
+//               "- We provide funding or cash advances based on business gross receipts.",
+//               "- Credit history does not affect eligibility.",
+//               "- Funding can be released within 24 hours or sooner.",
+//               "",
+//               "Classify the reply as TRUE or FALSE according to the following:",
+//               "",
+//               "Mark as TRUE if the reply:",
+//               "- Expresses curiosity, intent, or engagement about *receiving funding based on business performance*.",
+//               "- Asks for details, requirements, terms, next steps, or timing of funding.",
+//               "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
+//               "- Indicates willingness to discuss your specific funding service.",
+//               "- Asking for more details and questions about the offer (e.g. ,Do you fund business acquisitions?)",
+//               "- Asking for a call or meeting to discuss the offer (e.g. Can we schedule a call to discuss?)",
+//               "",
+//               "Mark as FALSE if the reply:",
+//               "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
+//               "- Expresses interest in something different from what is offered (e.g., only grants, loans, investments, or donations).",
+//               "- Is neutral, generic, or automated (e.g., 'Thanks', 'Received', 'Got it').",
+//               "- Contains conditions that exclude your type of offer (e.g., 'only interested in grants' or 'not open to funding').",
+//               "",
+//               "Respond with exactly one word — 'true' or 'false' — in lowercase. No punctuation or explanation.",
+//             ].join("\\n"),
+//           },
+//           { role: "user", content: text },
+//         ],
+//         temperature: 0,
+//       }),
+//     });
+
+//     console.log("RESPONSE IN ISACTUALLYINTERESTED");
+//     console.log(resp);
+
+//     if (!resp.ok) {
+//       console.error("LLM ERROR isActuallyInterested:", resp.status);
+//       // if (setErrorOccurred) setErrorOccurred(true);
+//       // throw new Error(`HTTP ${resp.status}`);
+//     }
+
+//     // --- Handle local NDJSON vs OpenRouter JSON ---
+//     let modelOut = "";
+
+//     if (useLocal) {
+//       // NDJSON stream parsing
+//       const raw = await resp.text();
+//       const lines = raw
+//         .split("\n")
+//         .map((l) => l.trim())
+//         .filter((l) => l.length > 0);
+
+//       let lastValid = null;
+//       for (let line of lines) {
+//         try {
+//           const obj = JSON.parse(line);
+//           if (obj?.message?.content) {
+//             lastValid = obj.message.content.trim();
+//             if (lastValid) break; // take the first non-empty response
+//           }
+//         } catch (e) {
+//           console.warn("Skipping bad NDJSON line:", line);
+//         }
+//       }
+
+//       modelOut = (lastValid || "").toLowerCase();
+//       console.log("Parsed NDJSON modelOut:", modelOut);
+//     } else {
+//       // OpenRouter JSON
+//       const json = await resp.json();
+//       console.log("Parsed OpenRouter JSON:", json);
+
+//       modelOut =
+//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
+//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
+//         "";
+//       console.log("Parsed OpenRouter modelOut:", modelOut);
+//     }
+
+//     // --- Interpret model output ---
+//     // Handle extra artifacts like "false<|begin_of_sentence|>" by sanitizing
+//     const tokenMatch = (modelOut.match(
+//       /\b(true|false|yes|no|interested|not interested)\b/i
+//     ) || [])[1];
+//     const normalizedOut = (tokenMatch || modelOut)
+//       .toString()
+//       .toLowerCase()
+//       .trim();
+
+//     if (
+//       ["true", "yes", "interested"].includes(normalizedOut) ||
+//       modelOut.includes("true")
+//     ) {
+//       if (typeof addTotalInterestedLLM === "function") {
+//         addTotalInterestedLLM(1);
+//       }
+//       return true;
+//     }
+
+//     if (
+//       ["false", "no", "not interested"].includes(normalizedOut) ||
+//       modelOut.includes("false")
+//     ) {
+//       return false;
+//     }
+
+//     console.warn("LLM gave unexpected output, falling back:", modelOut);
+
+//     // If OpenRouter response is unclear and we are not using local, attempt a local LLM fallback
+//     if (!useLocal) {
+//       try {
+//         const localController = new AbortController();
+//         const localTimeout = setTimeout(() => localController.abort(), 30000);
+
+//         const localResp = await fetch("http://localhost:11434/api/chat", {
+//           method: "POST",
+//           headers: { "Content-Type": "application/json" },
+//           signal: localController.signal,
+//           body: JSON.stringify({
+//             model: process.env.LOCAL_LLM,
+//             messages: [
+//               {
+//                 role: "system",
+//                 content: [
+//                   "Classify whether the following email reply from a prospect shows genuine interest",
+//                   "—asking for pricing, next steps, scheduling, or more info.",
+//                   "Ignore promotional pitches and auto-replies.",
+//                   'Answer strictly "true" or "false".',
+//                 ].join("\n"),
+//               },
+//               { role: "user", content: text },
+//             ],
+//             temperature: 0,
+//             stream: false,
+//           }),
+//         });
+
+//         clearTimeout(localTimeout);
+
+//         if (localResp.ok) {
+//           // Some local servers return JSON, others NDJSON; try JSON first
+//           let localOut = "";
+//           try {
+//             const localJson = await localResp.json();
+//             localOut = (localJson.message?.content || "").toLowerCase().trim();
+//           } catch (_) {
+//             const raw = await localResp.text();
+//             const lines = raw
+//               .split("\n")
+//               .map((l) => l.trim())
+//               .filter((l) => l.length > 0);
+//             let lastValid = null;
+//             for (let line of lines) {
+//               try {
+//                 const obj = JSON.parse(line);
+//                 if (obj?.message?.content) {
+//                   lastValid = obj.message.content.trim();
+//                   if (lastValid) break;
+//                 }
+//               } catch (e) {
+//                 // ignore bad lines
+//               }
+//             }
+//             localOut = (lastValid || "").toLowerCase();
+//           }
+
+//           const localToken = (localOut.match(/\b(true|false)\b/i) || [])[1];
+//           const localNorm = (localToken || localOut)
+//             .toString()
+//             .toLowerCase()
+//             .trim();
+
+//           if (localNorm === "true") {
+//             if (typeof addTotalInterestedLLM === "function")
+//               addTotalInterestedLLM(1);
+//             return true;
+//           }
+//           if (localNorm === "false") {
+//             return false;
+//           }
+//         }
+//       } catch (fallbackErr) {
+//         console.warn(
+//           "Local fallback failed:",
+//           fallbackErr && fallbackErr.message
+//         );
+//       }
+//     }
+//     // if (setErrorOccurred) setErrorOccurred(true);
+//   } catch (err) {
+//     console.error("LLM classification error:", err);
+//     // if (setErrorOccurred) setErrorOccurred(true);
+//   } finally {
+//     clearTimeout(timeoutId);
+//   }
+
+//   // 3. Fallback to local filters if LLM fails
+//   return ruleBasedCheck(text);
+// }
 
 async function encodeToSheet(
   spreadsheetId,
@@ -691,7 +880,8 @@ async function encodeToSheet(
   additionalContext,
   addToTotalEncoded,
   setErrorOccurred,
-  setErrorContext
+  setErrorContext,
+  addTotalToBeApproved
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -801,7 +991,7 @@ async function encodeToSheet(
       });
     }),
     (async () => {
-      await new Promise((r) => setTimeout(r, 10000));
+      await new Promise((r) => setTimeout(r, 40000));
       rl.close();
       console.log(
         "\n No response after 30 seconds — running fallback before proceeding..."
@@ -811,6 +1001,7 @@ async function encodeToSheet(
         additionalContext,
         setErrorOccurred,
         setErrorContext,
+        addTotalToBeApproved
       }); // await async fallback before continuing
       fallbackTriggered = true;
       return "fallback";
@@ -864,6 +1055,7 @@ async function appendToLeadDatabase({
   setErrorOccurred,
   setErrorContext,
   additionalContext = {},
+  addTotalToBeApproved
 }) {
   // Validate required input
   if (!rowJson) {
@@ -874,58 +1066,79 @@ async function appendToLeadDatabase({
     throw error;
   }
 
-  const query = `
-    INSERT INTO toBeEncodedLeads (
-      column_1, for_scheduling, sales_person, sales_person_email, company,
-      company_phone, phone_from_email, lead_first_name, lead_last_name,
-      lead_email, column_2, email_reply, phone_1, phone_number, phone_2,
-      address, city, state, zip, details, email_signature, linkedin_link,
-      second_contact_person_linked, status_after_call,
-      number_of_calls_spoken_with_leads, dropdown, clientid, tags, created_at, updated_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-      $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
-    )
-    RETURNING id;
-  `;
-
-  const values = [
-    rowJson["Column 1"]?.trim() || null,
-    rowJson["For scheduling"]?.trim() || null,
-    rowJson["sales person"]?.trim() || null,
-    rowJson["sales person email"]?.trim() || null,
-    rowJson["company"]?.trim() || null,
-    rowJson["company phone#"]?.trim() || null,
-    rowJson["phone#from email"]?.trim() || null,
-    rowJson["lead first name"]?.trim() || null,
-    rowJson["lead last name"]?.trim() || null,
-    rowJson["lead email"]?.trim() || null,
-    rowJson["Column 2"]?.trim() || null,
-    rowJson["email reply"]?.trim() || null,
-    rowJson["phone 1"]?.trim() || null,
-    rowJson["#"]?.trim() || null,
-    rowJson["phone2"]?.trim() || null,
-    rowJson["address"]?.trim() || null,
-    rowJson["city"]?.trim() || null,
-    rowJson["state"]?.trim() || null,
-    rowJson["zip"]?.trim() || null,
-    rowJson["details"]?.trim() || null,
-    rowJson["Email Signature"]?.trim() || null,
-    rowJson["linkedin link"]?.trim() || null,
-    rowJson["2nd contact person linked"]?.trim() || null,
-    rowJson["status after the call"]?.trim() || null,
-    rowJson["number of calls spoken with the leads "]?.trim() || null,
-    rowJson["@dropdown"]?.trim() || null,
-    additionalContext.ClientID ?? null,
-    additionalContext.Category ?? null,
-  ];
+  const leadEmail = rowJson["lead email"]?.trim() || null;
+  const emailReply = rowJson["email reply"]?.trim() || null;
 
   try {
+    // --- Step 1: Check for duplicates ---
+    const checkQuery = `
+      SELECT id FROM toBeEncodedLeads
+      WHERE lead_email = $1 OR email_reply = $2
+      LIMIT 1;
+    `;
+    const checkResult = await con.query(checkQuery, [leadEmail, emailReply]);
+
+    if (checkResult.rows.length > 0) {
+      console.log(
+        `⚠️ Skipped insertion: Lead already exists (ID: ${checkResult.rows[0].id}).`
+      );
+      return null; // Indicate skip
+    }
+
+    // --- Step 2: Proceed with insertion ---
+    const query = `
+      INSERT INTO toBeEncodedLeads (
+        column_1, for_scheduling, sales_person, sales_person_email, company,
+        company_phone, phone_from_email, lead_first_name, lead_last_name,
+        lead_email, column_2, email_reply, phone_1, phone_number, phone_2,
+        address, city, state, zip, details, email_signature, linkedin_link,
+        second_contact_person_linked, status_after_call,
+        number_of_calls_spoken_with_leads, dropdown, clientid, tags, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
+      )
+      RETURNING id;
+    `;
+
+    const values = [
+      rowJson["Column 1"]?.trim() || null,
+      rowJson["For scheduling"]?.trim() || null,
+      rowJson["sales person"]?.trim() || null,
+      rowJson["sales person email"]?.trim() || null,
+      rowJson["company"]?.trim() || null,
+      rowJson["company phone#"]?.trim() || null,
+      rowJson["phone#from email"]?.trim() || null,
+      rowJson["lead first name"]?.trim() || null,
+      rowJson["lead last name"]?.trim() || null,
+      leadEmail,
+      rowJson["Column 2"]?.trim() || null,
+      emailReply,
+      rowJson["phone 1"]?.trim() || null,
+      rowJson["#"]?.trim() || null,
+      rowJson["phone2"]?.trim() || null,
+      rowJson["address"]?.trim() || null,
+      rowJson["city"]?.trim() || null,
+      rowJson["state"]?.trim() || null,
+      rowJson["zip"]?.trim() || null,
+      rowJson["details"]?.trim() || null,
+      rowJson["Email Signature"]?.trim() || null,
+      rowJson["linkedin link"]?.trim() || null,
+      rowJson["2nd contact person linked"]?.trim() || null,
+      rowJson["status after the call"]?.trim() || null,
+      rowJson["number of calls spoken with the leads "]?.trim() || null,
+      rowJson["@dropdown"]?.trim() || null,
+      additionalContext.ClientID ?? null,
+      additionalContext.Category ?? null,
+    ];
+
     const result = await con.query(query, values);
     const insertedId = result.rows[0]?.id;
     console.log(`Lead inserted successfully with ID: ${insertedId}`);
+    addTotalToBeApproved(1)
     return insertedId;
+
   } catch (error) {
     console.error("Error inserting lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
@@ -936,90 +1149,6 @@ async function appendToLeadDatabase({
 
 
 // Called after successful encoding to sheet
-async function postAfterEncoding({
-  rowJson,
-  sheetUrl,
-  additionalContext,
-  setErrorOccurred,
-  setErrorContext,
-}) {
-  console.log("Sending POST request with encoded row data...");
-
-  // Build tags array dynamically
-  const tags = [];
-  if (additionalContext?.Category) {
-    tags.push(additionalContext.Category);
-  }
-
-  const reqBody = {
-    source: "",
-    status: "",
-    name: `${rowJson["lead first name"] || ""} ${
-      rowJson["lead last name"] || ""
-    }`.trim(),
-    assigned: "",
-    client_id: additionalContext.ClientID || "",
-    tags,
-    title: "",
-    email: rowJson["lead email"] || "",
-    website: rowJson.details || "",
-    phonenumber: rowJson["company phone#"] || "",
-    company: rowJson.company || "",
-    address: rowJson.address || "",
-    city: rowJson.city || "",
-    zip: rowJson.zip || "",
-    state: rowJson.state || "",
-    country: "",
-    default_language: "",
-    description: rowJson["email reply"] || "",
-    custom_contact_date: "",
-    is_public: sheetUrl || "",
-  };
-
-  const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
-
-  let attempts = 0;
-  const maxRetries = 3;
-  const baseDelay = 1000; // 1 second
-
-  while (attempts < maxRetries) {
-    try {
-      const response = await axios.post(
-        "https://govacrm.com/api/leads",
-        reqBody,
-        { headers: authHeaders }
-      );
-
-      console.log("POST request to CRM completed:", response.status);
-
-      if (response.status === 200) {
-        return true; // Success, stop retrying
-      } else {
-        throw new Error(`Unexpected status code: ${response.status}`);
-      }
-
-    } catch (err) {
-      attempts++;
-      console.error(
-        `Attempt ${attempts} failed: ${err.message}${
-          attempts < maxRetries ? " — retrying..." : ""
-        }`
-      );
-
-      if (attempts >= maxRetries) {
-        if (setErrorOccurred) setErrorOccurred(true);
-        if (setErrorContext) setErrorContext(err.message);
-        console.error("All retry attempts failed.");
-        return false;
-      }
-
-      // Wait before retrying (exponential backoff)
-      const delay = baseDelay * Math.pow(2, attempts - 1);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-}
-
 // async function postAfterEncoding({
 //   rowJson,
 //   sheetUrl,
@@ -1029,15 +1158,11 @@ async function postAfterEncoding({
 // }) {
 //   console.log("Sending POST request with encoded row data...");
 
-//     // Build tags array dynamically
+//   // Build tags array dynamically
 //   const tags = [];
-
-//   // Add category tag if available
 //   if (additionalContext?.Category) {
 //     tags.push(additionalContext.Category);
 //   }
-
-
 
 //   const reqBody = {
 //     source: "",
@@ -1064,116 +1189,205 @@ async function postAfterEncoding({
 //     is_public: sheetUrl || "",
 //   };
 
-//   try {
+//   const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
 
-//     const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+//   let attempts = 0;
+//   const maxRetries = 3;
+//   const baseDelay = 1000; // 1 second
 
-//     const response = await axios.post(
-//       "https://govacrm.com/api/leads",
-//       reqBody,
-//       { headers: authHeaders }
-//     );
-//     console.log("POST request to CRM completed:", response.status);
-//     if(response.status !== 200){
-//       if (setErrorOccurred) setErrorOccurred(true);
+//   while (attempts < maxRetries) {
+//     try {
+//       const response = await axios.post(
+//         "https://govacrm.com/api/leads",
+//         reqBody,
+//         { headers: authHeaders }
+//       );
+
+//       console.log("POST request to CRM completed:", response.status);
+
+//       if (response.status === 200) {
+//         return true; // Success, stop retrying
+//       } else {
+//         throw new Error(`Unexpected status code: ${response.status}`);
+//       }
+
+//     } catch (err) {
+//       attempts++;
+//       console.error(
+//         `Attempt ${attempts} failed: ${err.message}${
+//           attempts < maxRetries ? " — retrying..." : ""
+//         }`
+//       );
+
+//       if (attempts >= maxRetries) {
+//         if (setErrorOccurred) setErrorOccurred(true);
+//         if (setErrorContext) setErrorContext(err.message);
+//         console.error("All retry attempts failed.");
+//         return false;
+//       }
+
+//       // Wait before retrying (exponential backoff)
+//       const delay = baseDelay * Math.pow(2, attempts - 1);
+//       await new Promise((resolve) => setTimeout(resolve, delay));
 //     }
-
-//     return true;
-//   } catch (err) {
-//     if (setErrorOccurred) setErrorOccurred(true);
-//     if (setErrorContext) setErrorContext(err.message);
-//     console.error("Failed to send POST request:", err.message);
 //   }
 // }
 
-// function normalizeLeadData(leadData, context = {}) {
-//   const {
-//     processEnvAgent = process.env.AGENT_NAME || "instaSheet agent x1",
-//     salesPerson,
-//     salesPersonEmail,
-//     extracted = {},
-//     payload = {},
-//     phone1,
-//     phone2,
-//     phoneFromEmail,
-//     firstName,
-//     lastName,
-//     leadEmail,
-//     emailSignature,
-//     lead = {},
-//   } = context;
+async function postAfterEncoding({
+  rowJson,
+  sheetUrl,
+  additionalContext,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  console.log("Sending POST request with encoded row data...");
 
-//   //Determine if input is from DB (snake_case) or req.body (camelCase)
-//   const isFromDB = Object.keys(leadData).some((key) => key.includes("_"));
+    // Build tags array dynamically
+  const tags = [];
 
-//   if (isFromDB) {
-//     // Normalize DB record → Sheet structure
-//     return {
-//       "Column 1": leadData.column_1 || processEnvAgent,
-//       "For scheduling": leadData.for_scheduling || "",
-//       "sales person": leadData.sales_person || "",
-//       "sales person email": leadData.sales_person_email || "",
-//       company: leadData.company || "",
-//       "company phone#": leadData.company_phone || "none",
-//       "phone#from email": leadData.phone_from_email || "none",
-//       "lead first name": leadData.lead_first_name || "",
-//       "lead last name": leadData.lead_last_name || "",
-//       "lead email": leadData.lead_email || "",
-//       "Column 2": leadData.column_2 || leadData.lead_email || "",
-//       "email reply": leadData.email_reply || "",
-//       "phone 1": leadData.phone_1 || "",
-//       "#": leadData.phone_number || leadData.phone_1 || "",
-//       phone2: leadData.phone_2 || "",
-//       address: leadData.address || "",
-//       city: leadData.city || "",
-//       state: leadData.state || "",
-//       zip: leadData.zip || "",
-//       details: leadData.details || "",
-//       "Email Signature": leadData.email_signature || "",
-//       "linkedin link": leadData.linkedin_link || "none",
-//       "2nd contact person linked":
-//         leadData.second_contact_person_linked || "none",
-//       "status after the call": leadData.status_after_call || "none",
-//       "number of calls spoken with the leads":
-//         leadData.number_of_calls_spoken_with_leads || "",
-//       "@dropdown": leadData.dropdown || "",
-//     };
-//   } else {
-//     // Normalize direct payload (req.body → Sheet structure)
-//     return {
-//       "Column 1": processEnvAgent,
-//       "For scheduling": "",
-//       "sales person": salesPerson || "",
-//       "sales person email": salesPersonEmail || "",
-//       company: lead?.company_name || lead?.company || "",
-//       "company phone#": lead?.phone || "none",
-//       "phone#from email": phoneFromEmail || "none",
-//       "lead first name": firstName || "",
-//       "lead last name": lastName || "",
-//       "lead email": leadEmail,
-//       "Column 2": leadEmail,
-//       "email reply": extracted.reply || "",
-//       "phone 1": phone1 || "",
-//       "#": phone1 || "",
-//       phone2: phone2 || "",
-//       address: payload.address || lead?.address || "",
-//       city: payload.city || lead?.city || "",
-//       state: payload.state || lead?.state || payload.organization_state || "",
-//       zip:
-//         payload.zip ||
-//         payload.zip_code ||
-//         payload.organization_postal_code ||
-//         "",
-//       details: payload.details || lead?.details || lead?.website || "",
-//       "Email Signature": extracted.signature || emailSignature || "",
-//       "linkedin link": "none",
-//       "2nd contact person linked": "none",
-//       "status after the call": "none",
-//       "number of calls spoken with the leads": "",
-//       "@dropdown": "",
-//     };
-//   }
-// }
+  // Add category tag if available
+  if (additionalContext?.Category) {
+    tags.push(additionalContext.Category);
+  }
+
+
+
+  const reqBody = {
+    source: "",
+    status: "",
+    name: `${rowJson["lead first name"] || ""} ${
+      rowJson["lead last name"] || ""
+    }`.trim(),
+    assigned: "",
+    client_id: additionalContext.ClientID || "",
+    tags,
+    title: "",
+    email: rowJson["lead email"] || "",
+    website: rowJson.details || "",
+    phonenumber: rowJson["company phone#"] || "",
+    company: rowJson.company || "",
+    address: rowJson.address || "",
+    city: rowJson.city || "",
+    zip: rowJson.zip || "",
+    state: rowJson.state || "",
+    country: "",
+    default_language: "",
+    description: rowJson["email reply"] || "",
+    custom_contact_date: "",
+    is_public: sheetUrl || "",
+  };
+
+  try {
+    console.log(colorize("TO BE PUSHED TO THE CRM", "blue"))
+    console.log(reqBody)
+    // const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+
+    // const response = await axios.post(
+    //   "https://govacrm.com/api/leads",
+    //   reqBody,
+    //   { headers: authHeaders }
+    // );
+    // console.log("POST request to CRM completed:", response.status);
+    // if(response.status !== 200){
+    //   if (setErrorOccurred) setErrorOccurred(true);
+    // }
+
+    return true;
+  } catch (err) {
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(err.message);
+    console.error("Failed to send POST request:", err.message);
+  }
+}
+
+function normalizeLeadData(leadData, context = {}) {
+  const {
+    processEnvAgent = process.env.AGENT_NAME || "instaSheet agent x1",
+    salesPerson,
+    salesPersonEmail,
+    extracted = {},
+    payload = {},
+    phone1,
+    phone2,
+    phoneFromEmail,
+    firstName,
+    lastName,
+    leadEmail,
+    emailSignature,
+    lead = {},
+  } = context;
+
+  //Determine if input is from DB (snake_case) or req.body (camelCase)
+  const isFromDB = Object.keys(leadData).some((key) => key.includes("_"));
+
+  if (isFromDB) {
+    // Normalize DB record → Sheet structure
+    return {
+      "Column 1": leadData.column_1 || processEnvAgent,
+      "For scheduling": leadData.for_scheduling || "",
+      "sales person": leadData.sales_person || "",
+      "sales person email": leadData.sales_person_email || "",
+      company: leadData.company || "",
+      "company phone#": leadData.company_phone || "none",
+      "phone#from email": leadData.phone_from_email || "none",
+      "lead first name": leadData.lead_first_name || "",
+      "lead last name": leadData.lead_last_name || "",
+      "lead email": leadData.lead_email || "",
+      "Column 2": leadData.column_2 || leadData.lead_email || "",
+      "email reply": leadData.email_reply || "",
+      "phone 1": leadData.phone_1 || "",
+      "#": leadData.phone_number || leadData.phone_1 || "",
+      phone2: leadData.phone_2 || "",
+      address: leadData.address || "",
+      city: leadData.city || "",
+      state: leadData.state || "",
+      zip: leadData.zip || "",
+      details: leadData.details || "",
+      "Email Signature": leadData.email_signature || "",
+      "linkedin link": leadData.linkedin_link || "none",
+      "2nd contact person linked":
+        leadData.second_contact_person_linked || "none",
+      "status after the call": leadData.status_after_call || "none",
+      "number of calls spoken with the leads":
+        leadData.number_of_calls_spoken_with_leads || "",
+      "@dropdown": leadData.dropdown || "",
+    };
+  } else {
+    // Normalize direct payload (req.body → Sheet structure)
+    return {
+      "Column 1": processEnvAgent,
+      "For scheduling": "",
+      "sales person": salesPerson || "",
+      "sales person email": salesPersonEmail || "",
+      company: lead?.company_name || lead?.company || "",
+      "company phone#": lead?.phone || "none",
+      "phone#from email": phoneFromEmail || "none",
+      "lead first name": firstName || "",
+      "lead last name": lastName || "",
+      "lead email": leadEmail,
+      "Column 2": leadEmail,
+      "email reply": extracted.reply || "",
+      "phone 1": phone1 || "",
+      "#": phone1 || "",
+      phone2: phone2 || "",
+      address: payload.address || lead?.address || "",
+      city: payload.city || lead?.city || "",
+      state: payload.state || lead?.state || payload.organization_state || "",
+      zip:
+        payload.zip ||
+        payload.zip_code ||
+        payload.organization_postal_code ||
+        "",
+      details: payload.details || lead?.details || lead?.website || "",
+      "Email Signature": extracted.signature || emailSignature || "",
+      "linkedin link": "none",
+      "2nd contact person linked": "none",
+      "status after the call": "none",
+      "number of calls spoken with the leads": "",
+      "@dropdown": "",
+    };
+  }
+}
 
 async function encodeLeadFromRequest({
   spreadsheetId,

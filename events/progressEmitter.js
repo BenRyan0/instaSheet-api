@@ -12,6 +12,7 @@ function buildProgressState({
   maxPagesCap,
   aiInterestThreshold,
   totalEncoded = 0,
+  totalToBeApproved = 0,
   totalInterestedLLM = 0,
 }) {
  // Avoid divide-by-zero
@@ -41,6 +42,7 @@ function buildProgressState({
     maxPagesCap,
     aiInterestThreshold,
     totalEncoded,
+    totalToBeApproved,
     totalInterestedLLM,
     percentComplete,
     timestamp: Date.now(),

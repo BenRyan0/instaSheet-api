@@ -35,6 +35,7 @@ const loggerController = require("./loggerController");
 class instantlyAiController {
   // Global variables accessible from other methods
   totalEncoded = 0;
+  totalToBeApproved = 0;
   totalEnterestedLLM = 0;
   errorOccurred = false;
   errorContext = "";
@@ -43,6 +44,9 @@ class instantlyAiController {
   // Setter for totalEncoded (overwrites)
   setTotalEncoded(val) {
     this.totalEncoded = val;
+  }
+  setTotalToBeApproved(val) {
+    this.totalToBeApproved = val;
   }
   setTotalEnterestedLLM(val) {
     this.totalEnterestedLLM = val;
@@ -64,6 +68,9 @@ class instantlyAiController {
   }
   addTotalEnterestedLLM(val) {
     this.totalEnterestedLLM += val;
+  }
+  addTotalToBeApproved(val) {
+    this.totalToBeApproved += val;
   }
 
   // process a single email row, must return a Promise<boolean>
@@ -115,6 +122,7 @@ class instantlyAiController {
     setErrorOccurred,
     setErrorContext,
     addToTotalEncoded,
+    addTotalToBeApproved
   }) {
     console.log(colorize("Processing lead Email ...", "blue"));
     console.log("additionalContext");
@@ -259,6 +267,8 @@ class instantlyAiController {
         cursor = getNextCursor(page);
 
         const batch = filterNewLeads(leads, seen);
+        console.log(batch)
+        console.log("batch")
 
         if (batch.length === 0) continue;
 
@@ -419,6 +429,7 @@ class instantlyAiController {
                   addToTotalEncoded: this.addToTotalEncoded.bind(this),
                   setErrorOccurred: this.setErrorOccurred.bind(this),
                   setErrorContext: this.setErrorContext.bind(this),
+                  addTotalToBeApproved : this.addTotalToBeApproved.bind(this)
                 });
               } catch (e) {
                 console.warn("processEmailRow threw", {

@@ -96,14 +96,15 @@ async function fetchLeadsPage({
     if (response.data?.next_starting_after) {
       const newCursor = response.data.next_starting_after;
 
-      await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // 1 hour expiry
+      // await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // 1 hour expiry
+      await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
       await redisClient.del(redisFailCountKey);
 
       // Store latest campaign + pageLimit metadata
       await redisClient.set(
         redisMetaKey,
         JSON.stringify({ campaignId, pageLimit }),
-        { EX: 7200 }
+        { EX: 1800 }
       );
 
       console.log(
@@ -862,8 +863,17 @@ async function appendToLeadDatabase({
   rowJson,
   setErrorOccurred,
   setErrorContext,
-  additionalContext,
+  additionalContext = {},
 }) {
+  // Validate required input
+  if (!rowJson) {
+    const error = new Error("Missing rowJson input.");
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(error.message);
+    console.error(error.message);
+    throw error;
+  }
+
   const query = `
     INSERT INTO toBeEncodedLeads (
       column_1, for_scheduling, sales_person, sales_person_email, company,
@@ -875,53 +885,55 @@ async function appendToLeadDatabase({
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-      $21, $22, $23, $24, $25, $26, NOW(), NOW()
+      $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
     )
     RETURNING id;
   `;
 
   const values = [
-    rowJson["Column 1"] || null,
-    rowJson["For scheduling"] || null,
-    rowJson["sales person"] || null,
-    rowJson["sales person email"] || null,
-    rowJson["company"] || null,
-    rowJson["company phone#"] || null,
-    rowJson["phone#from email"] || null,
-    rowJson["lead first name"] || null,
-    rowJson["lead last name"] || null,
-    rowJson["lead email"] || null,
-    rowJson["Column 2"] || null,
-    rowJson["email reply"] || null,
-    rowJson["phone 1"] || null,
-    rowJson["#"] || null,
-    rowJson["phone2"] || null,
-    rowJson["address"] || null,
-    rowJson["city"] || null,
-    rowJson["state"] || null,
-    rowJson["zip"] || null,
-    rowJson["details"] || null,
-    rowJson["Email Signature"] || null,
-    rowJson["linkedin link"] || null,
-    rowJson["2nd contact person linked"] || null,
-    rowJson["status after the call"] || null,
-    rowJson["number of calls spoken with the leads "] || null,
-    rowJson["@dropdown"] || null,
-    additionalContext.ClientID || null,
-    additionalContext.Category || null,
+    rowJson["Column 1"]?.trim() || null,
+    rowJson["For scheduling"]?.trim() || null,
+    rowJson["sales person"]?.trim() || null,
+    rowJson["sales person email"]?.trim() || null,
+    rowJson["company"]?.trim() || null,
+    rowJson["company phone#"]?.trim() || null,
+    rowJson["phone#from email"]?.trim() || null,
+    rowJson["lead first name"]?.trim() || null,
+    rowJson["lead last name"]?.trim() || null,
+    rowJson["lead email"]?.trim() || null,
+    rowJson["Column 2"]?.trim() || null,
+    rowJson["email reply"]?.trim() || null,
+    rowJson["phone 1"]?.trim() || null,
+    rowJson["#"]?.trim() || null,
+    rowJson["phone2"]?.trim() || null,
+    rowJson["address"]?.trim() || null,
+    rowJson["city"]?.trim() || null,
+    rowJson["state"]?.trim() || null,
+    rowJson["zip"]?.trim() || null,
+    rowJson["details"]?.trim() || null,
+    rowJson["Email Signature"]?.trim() || null,
+    rowJson["linkedin link"]?.trim() || null,
+    rowJson["2nd contact person linked"]?.trim() || null,
+    rowJson["status after the call"]?.trim() || null,
+    rowJson["number of calls spoken with the leads "]?.trim() || null,
+    rowJson["@dropdown"]?.trim() || null,
+    additionalContext.ClientID ?? null,
+    additionalContext.Category ?? null,
   ];
 
   try {
     const result = await con.query(query, values);
-    console.log(`Lead inserted successfully with ID: ${result.rows[0].id}`);
-    return result.rows[0].id;
+    const insertedId = result.rows[0]?.id;
+    console.log(`Lead inserted successfully with ID: ${insertedId}`);
+    return insertedId;
   } catch (error) {
+    console.error("Error inserting lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
     if (setErrorContext) setErrorContext(error.message);
-    console.error("Error inserting lead:", error.message);
     throw error;
   }
 }
+
 
 // Called after successful encoding to sheet
 async function postAfterEncoding({
@@ -1074,94 +1086,94 @@ async function postAfterEncoding({
 //   }
 // }
 
-function normalizeLeadData(leadData, context = {}) {
-  const {
-    processEnvAgent = process.env.AGENT_NAME || "instaSheet agent x1",
-    salesPerson,
-    salesPersonEmail,
-    extracted = {},
-    payload = {},
-    phone1,
-    phone2,
-    phoneFromEmail,
-    firstName,
-    lastName,
-    leadEmail,
-    emailSignature,
-    lead = {},
-  } = context;
+// function normalizeLeadData(leadData, context = {}) {
+//   const {
+//     processEnvAgent = process.env.AGENT_NAME || "instaSheet agent x1",
+//     salesPerson,
+//     salesPersonEmail,
+//     extracted = {},
+//     payload = {},
+//     phone1,
+//     phone2,
+//     phoneFromEmail,
+//     firstName,
+//     lastName,
+//     leadEmail,
+//     emailSignature,
+//     lead = {},
+//   } = context;
 
-  //Determine if input is from DB (snake_case) or req.body (camelCase)
-  const isFromDB = Object.keys(leadData).some((key) => key.includes("_"));
+//   //Determine if input is from DB (snake_case) or req.body (camelCase)
+//   const isFromDB = Object.keys(leadData).some((key) => key.includes("_"));
 
-  if (isFromDB) {
-    // Normalize DB record → Sheet structure
-    return {
-      "Column 1": leadData.column_1 || processEnvAgent,
-      "For scheduling": leadData.for_scheduling || "",
-      "sales person": leadData.sales_person || "",
-      "sales person email": leadData.sales_person_email || "",
-      company: leadData.company || "",
-      "company phone#": leadData.company_phone || "none",
-      "phone#from email": leadData.phone_from_email || "none",
-      "lead first name": leadData.lead_first_name || "",
-      "lead last name": leadData.lead_last_name || "",
-      "lead email": leadData.lead_email || "",
-      "Column 2": leadData.column_2 || leadData.lead_email || "",
-      "email reply": leadData.email_reply || "",
-      "phone 1": leadData.phone_1 || "",
-      "#": leadData.phone_number || leadData.phone_1 || "",
-      phone2: leadData.phone_2 || "",
-      address: leadData.address || "",
-      city: leadData.city || "",
-      state: leadData.state || "",
-      zip: leadData.zip || "",
-      details: leadData.details || "",
-      "Email Signature": leadData.email_signature || "",
-      "linkedin link": leadData.linkedin_link || "none",
-      "2nd contact person linked":
-        leadData.second_contact_person_linked || "none",
-      "status after the call": leadData.status_after_call || "none",
-      "number of calls spoken with the leads":
-        leadData.number_of_calls_spoken_with_leads || "",
-      "@dropdown": leadData.dropdown || "",
-    };
-  } else {
-    // Normalize direct payload (req.body → Sheet structure)
-    return {
-      "Column 1": processEnvAgent,
-      "For scheduling": "",
-      "sales person": salesPerson || "",
-      "sales person email": salesPersonEmail || "",
-      company: lead?.company_name || lead?.company || "",
-      "company phone#": lead?.phone || "none",
-      "phone#from email": phoneFromEmail || "none",
-      "lead first name": firstName || "",
-      "lead last name": lastName || "",
-      "lead email": leadEmail,
-      "Column 2": leadEmail,
-      "email reply": extracted.reply || "",
-      "phone 1": phone1 || "",
-      "#": phone1 || "",
-      phone2: phone2 || "",
-      address: payload.address || lead?.address || "",
-      city: payload.city || lead?.city || "",
-      state: payload.state || lead?.state || payload.organization_state || "",
-      zip:
-        payload.zip ||
-        payload.zip_code ||
-        payload.organization_postal_code ||
-        "",
-      details: payload.details || lead?.details || lead?.website || "",
-      "Email Signature": extracted.signature || emailSignature || "",
-      "linkedin link": "none",
-      "2nd contact person linked": "none",
-      "status after the call": "none",
-      "number of calls spoken with the leads": "",
-      "@dropdown": "",
-    };
-  }
-}
+//   if (isFromDB) {
+//     // Normalize DB record → Sheet structure
+//     return {
+//       "Column 1": leadData.column_1 || processEnvAgent,
+//       "For scheduling": leadData.for_scheduling || "",
+//       "sales person": leadData.sales_person || "",
+//       "sales person email": leadData.sales_person_email || "",
+//       company: leadData.company || "",
+//       "company phone#": leadData.company_phone || "none",
+//       "phone#from email": leadData.phone_from_email || "none",
+//       "lead first name": leadData.lead_first_name || "",
+//       "lead last name": leadData.lead_last_name || "",
+//       "lead email": leadData.lead_email || "",
+//       "Column 2": leadData.column_2 || leadData.lead_email || "",
+//       "email reply": leadData.email_reply || "",
+//       "phone 1": leadData.phone_1 || "",
+//       "#": leadData.phone_number || leadData.phone_1 || "",
+//       phone2: leadData.phone_2 || "",
+//       address: leadData.address || "",
+//       city: leadData.city || "",
+//       state: leadData.state || "",
+//       zip: leadData.zip || "",
+//       details: leadData.details || "",
+//       "Email Signature": leadData.email_signature || "",
+//       "linkedin link": leadData.linkedin_link || "none",
+//       "2nd contact person linked":
+//         leadData.second_contact_person_linked || "none",
+//       "status after the call": leadData.status_after_call || "none",
+//       "number of calls spoken with the leads":
+//         leadData.number_of_calls_spoken_with_leads || "",
+//       "@dropdown": leadData.dropdown || "",
+//     };
+//   } else {
+//     // Normalize direct payload (req.body → Sheet structure)
+//     return {
+//       "Column 1": processEnvAgent,
+//       "For scheduling": "",
+//       "sales person": salesPerson || "",
+//       "sales person email": salesPersonEmail || "",
+//       company: lead?.company_name || lead?.company || "",
+//       "company phone#": lead?.phone || "none",
+//       "phone#from email": phoneFromEmail || "none",
+//       "lead first name": firstName || "",
+//       "lead last name": lastName || "",
+//       "lead email": leadEmail,
+//       "Column 2": leadEmail,
+//       "email reply": extracted.reply || "",
+//       "phone 1": phone1 || "",
+//       "#": phone1 || "",
+//       phone2: phone2 || "",
+//       address: payload.address || lead?.address || "",
+//       city: payload.city || lead?.city || "",
+//       state: payload.state || lead?.state || payload.organization_state || "",
+//       zip:
+//         payload.zip ||
+//         payload.zip_code ||
+//         payload.organization_postal_code ||
+//         "",
+//       details: payload.details || lead?.details || lead?.website || "",
+//       "Email Signature": extracted.signature || emailSignature || "",
+//       "linkedin link": "none",
+//       "2nd contact person linked": "none",
+//       "status after the call": "none",
+//       "number of calls spoken with the leads": "",
+//       "@dropdown": "",
+//     };
+//   }
+// }
 
 async function encodeLeadFromRequest({
   spreadsheetId,

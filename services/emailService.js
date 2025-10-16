@@ -60,6 +60,12 @@ async function fetchRepliesForLead(
         headers: authHeaders,
       }
     );
+    // const response = await axios.get(
+    //   `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
+    //   {
+    //     headers: authHeaders,
+    //   }
+    // );
 
     const emails = normalizeLeadsArray(response.data || []);
     const emailContent = emails[0]?.body?.text || "";

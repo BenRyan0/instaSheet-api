@@ -3,7 +3,10 @@ const { responseReturn } = require("../utils/response");
 
 class loggerController {
   // logController.js
+
   addNewLog = async (logData) => {
+      console.log("logData")
+      console.log(logData)
     try {
       const insertQuery = `
       INSERT INTO encoding_runs (
@@ -17,8 +20,9 @@ class loggerController {
         max_pages_cap,
         ai_interest_threshold,
         total_encoded,
-        error_context
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        error_context,
+        total_tobe_approved
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING id
     `;
 
@@ -34,6 +38,7 @@ class loggerController {
         logData.aiInterestThreshold,
         logData.totalEncoded,
         logData.errorContext || "",
+        logData.totalToBeApproved || 0,
       ];
 
       const result = await con.query(insertQuery, values);

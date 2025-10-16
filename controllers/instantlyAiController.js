@@ -162,7 +162,8 @@ class instantlyAiController {
             additionalContext,
             addToTotalEncoded,
             setErrorOccurred,
-            setErrorContext
+            setErrorContext,
+            addTotalToBeApproved
           );
         }
         return true; // Continue flow regardless
@@ -185,7 +186,8 @@ class instantlyAiController {
             additionalContext,
             addToTotalEncoded,
             setErrorOccurred,
-            setErrorContext
+            setErrorContext,
+            addTotalToBeApproved
           );
         }
         return true; // Continue flow regardless
@@ -449,6 +451,7 @@ class instantlyAiController {
               state.collect(row, true);
               state.totalInterestedLLM = this.totalEnterestedLLM;
               state.totalEncoded = this.totalEncoded;
+              state.totalToBeApproved = this.totalToBeApproved;
               emitProgress(state);
               // Mark as processed only after success
               if (key) {

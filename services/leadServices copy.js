@@ -11,14 +11,10 @@ const con = require("../db/db.js");
 const { getAuthHeaders } = require("../utils/auth");
 
 const { patterns } = require("../Filters/addressRegexConfig.json");
-const { responseReturn } = require("../utils/response.js");
-// Compile regexes once
-const regexes = Object.fromEntries(
-  Object.entries(patterns).map(([key, { pattern, flags }]) => [
-    key,
-    new RegExp(pattern, flags),
-  ])
-);
+const regexes = {};
+for (const [key, { pattern, flags }] of Object.entries(patterns)) {
+  regexes[key] = new RegExp(pattern, flags);
+}
 
 const FILTER_LEAD_INTERESTED_BASE = {
   lt_interest_status: 1,
@@ -267,102 +263,87 @@ async function isAddressUsBased({
   setErrorOccurred,
   setErrorContext,
 } = {}) {
+  const fields = { address, city, state, zip, country, phone };
+  console.log(
+    colorize("Analyzing Address if US based - Address ONLY ...", "blue")
+  );
+  // Make a unified array of all field values
+  const allValues = Object.values(fields).filter(Boolean);
+
+  // 1. explicit country mentions
   try {
-    const fields = { address, city, state, zip, country, phone };
-    const allValues = Object.values(fields).filter(Boolean);
-
-    console.log(
-      colorize("Analyzing Address if US based (robust mix mode)...", "blue")
-    );
-
-    // Combine all parts for fallback testing (in case city/state swapped)
-    const combinedText = `${address} ${city} ${state} ${zip} ${country}`.trim();
-
-    // ✅ Helper to test a regex on all values or combined text
-    const matchesAny = (regex) =>
-      allValues.some((val) => regex.test(val)) || regex.test(combinedText);
-
-    // 1️⃣ Explicit U.S. country mentions
-    if (matchesAny(regexes.countryUsa)) {
-      console.log(colorize("Matched US country reference", "green"));
+    if (allValues.some((val) => regexes.countryUsa.test(val))) {
+      console.log(colorize("Country is US based", "green"));
       return true;
     }
 
-    // 2️⃣ State abbreviations or full names (even if inside city)
+    // 2. state abbreviations or full names in any field
     if (
-      matchesAny(regexes.stateAbbreviations) ||
-      matchesAny(regexes.fullStateNames)
+      allValues.some(
+        (val) =>
+          regexes.stateAbbreviations.test(val) ||
+          regexes.fullStateNames.test(val)
+      )
     ) {
-      console.log(colorize("Matched US state name or abbreviation", "green"));
+      console.log(colorize("State is US based", "green"));
       return true;
     }
 
-    // 3️⃣ ZIP code (5-digit or ZIP+4)
-    if (matchesAny(regexes.zip)) {
-      console.log(colorize("Matched US ZIP code", "green"));
+    // 3. ZIP code in any field
+    if (allValues.some((val) => regexes.zip.test(val))) {
+      console.log(colorize("ZIP is US based", "green"));
       return true;
     }
 
-    // 4️⃣ Well-known US city names (may appear in state field)
-    if (matchesAny(regexes.usCities)) {
-      console.log(colorize("Matched common US city name", "green"));
+    // 4. well-known US city names in any field
+    if (allValues.some((val) => regexes.usCities.test(val))) {
+      console.log(colorize("City is US based", "green"));
       return true;
     }
 
-    // 5️⃣ City+State combos (works even if city/state swapped)
-    if (
-      matchesAny(regexes.cityStateCombo) ||
-      /[A-Za-z\s]+,\s*[A-Z]{2}\b/i.test(combinedText)
-    ) {
-      console.log(colorize("Matched City-State combo pattern", "green"));
+    // 5. city+state combos (like "Boston, MA") in any field
+    if (allValues.some((val) => regexes.cityStateCombo.test(val))) {
+      console.log(colorize("City-State combo is US based", "green"));
       return true;
     }
-
-    // 6️⃣ US/Canada phone number
-    const phoneMatch = allValues.find((val) => regexes.phoneUsCanada.test(val));
-    if (phoneMatch) {
-      const countryPrefix = phoneMatch.trim().startsWith("+1")
-        ? "US/Canada (+1)"
+    // 6. phone number (US or Canada)
+    if (allValues.some((val) => regexes.phoneUsCanada.test(val))) {
+      const countryPrefix = val.trim().startsWith("+1")
+        ? "US/Canada (shared +1 code)"
         : "Possibly US/Canada format";
-      console.log(colorize(`Matched phone format: ${countryPrefix}`, "green"));
+      console.log(colorize(`Phone matches ${countryPrefix}`, "green"));
       return true;
     }
 
-    // 7️⃣ Contextual heuristic: check mixed text combos
-    const normalizedText = combinedText.toLowerCase();
-
-    // Allow partial indicators like “usa tx”, “new york us”, “ca united states”
-    const mixedPatterns = [
-      /\busa\b/,
-      /\bunited states\b/,
-      /\bamerica\b/,
-      /\b[a-z\s]+,\s*(usa|united states|us)\b/,
-      /\b(usa|united states|us)\s*[a-z\s]+/,
-    ];
-    if (mixedPatterns.some((r) => r.test(normalizedText))) {
-      console.log(colorize("Matched heuristic US phrase mix", "green"));
+    // 6. fallback: combine address + city + state
+    const combined = `${address} ${city} ${state}`.trim();
+    if (
+      regexes.stateAbbreviations.test(combined) ||
+      regexes.fullStateNames.test(combined) ||
+      regexes.zip.test(combined)
+    ) {
+      console.log(colorize("Combined address is US based", "green"));
       return true;
     }
 
-    // 8️⃣ Last resort: call AI model if regex inconclusive
+    // 7. Last resort → Ask AI model
     console.log(colorize("Regex inconclusive, asking AI model ...", "yellow"));
     const aiResult = await isUSByAI({
-      addressText: combinedText,
+      addressText: `${address} ${city} ${state} ${zip} ${country}`,
       setErrorOccurred,
       setErrorContext,
     });
-
     if (aiResult) {
       console.log(colorize("AI confirmed: US based", "green"));
       return true;
     }
 
-    console.log(colorize("Address not US based (regex + AI fallback)", "red"));
+    console.log(
+      colorize("Address not US based - Address ONLY(regex-LLM)", "red")
+    );
     return false;
   } catch (error) {
-    console.error(error);
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
+    console.log(error);
     return false;
   }
 }
@@ -550,13 +531,11 @@ async function isActuallyInterested(
     if (!resp.ok) {
       console.error("LLM ERROR isActuallyInterested:", resp.status);
 
-      // Rate-limit detected → retry with next API key
+      // 🧠 Rate-limit detected → retry with next API key
       if (resp.status === 429) {
         if (keyIndex < apiKeys.length - 1) {
           console.warn(
-            `Rate limited on API key #${
-              keyIndex + 1
-            }. Retrying with next key...`
+            `Rate limited on API key #${keyIndex + 1}. Retrying with next key...`
           );
           return await isActuallyInterested(
             emailReply,
@@ -647,6 +626,7 @@ async function isActuallyInterested(
   // Fallback to rule-based check if all else fails
   return ruleBasedCheck(text);
 }
+
 
 // async function isActuallyInterested(
 //   emailReply,
@@ -1022,9 +1002,7 @@ async function encodeToSheet(
         additionalContext,
         setErrorOccurred,
         setErrorContext,
-        addTotalToBeApproved,
-        spreadsheetId,
-        sheetName,
+        addTotalToBeApproved
       }); // await async fallback before continuing
       fallbackTriggered = true;
       return "fallback";
@@ -1078,9 +1056,7 @@ async function appendToLeadDatabase({
   setErrorOccurred,
   setErrorContext,
   additionalContext = {},
-  addTotalToBeApproved,
-  spreadsheetId,
-  sheetName,
+  addTotalToBeApproved
 }) {
   // Validate required input
   if (!rowJson) {
@@ -1105,7 +1081,7 @@ async function appendToLeadDatabase({
 
     if (checkResult.rows.length > 0) {
       console.log(
-        `Skipped insertion: Lead already exists (ID: ${checkResult.rows[0].id}).`
+        `⚠️ Skipped insertion: Lead already exists (ID: ${checkResult.rows[0].id}).`
       );
       return null; // Indicate skip
     }
@@ -1118,11 +1094,11 @@ async function appendToLeadDatabase({
         lead_email, column_2, email_reply, phone_1, phone_number, phone_2,
         address, city, state, zip, details, email_signature, linkedin_link,
         second_contact_person_linked, status_after_call,
-        number_of_calls_spoken_with_leads, dropdown, clientid, tags, sheet_name, sheet_id, created_at, updated_at
+        number_of_calls_spoken_with_leads, dropdown, clientid, tags, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28,$29,$30 ,NOW(), NOW()
+        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
       )
       RETURNING id;
     `;
@@ -1156,20 +1132,14 @@ async function appendToLeadDatabase({
       rowJson["@dropdown"]?.trim() || null,
       additionalContext.ClientID ?? null,
       additionalContext.Category ?? null,
-      sheetName,
-      spreadsheetId,
     ];
 
     const result = await con.query(query, values);
     const insertedId = result.rows[0]?.id;
     console.log(`Lead inserted successfully with ID: ${insertedId}`);
-
-    //  if (typeof addTotalToBeApproved === "function") {
-    //     addTotalToBeApproved(1);
-    //   }
-    addTotalToBeApproved(1);
-
+    addTotalToBeApproved(1)
     return insertedId;
+
   } catch (error) {
     console.error("Error inserting lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
@@ -1177,6 +1147,7 @@ async function appendToLeadDatabase({
     throw error;
   }
 }
+
 
 // Called after successful encoding to sheet
 // async function postAfterEncoding({
@@ -1272,13 +1243,15 @@ async function postAfterEncoding({
 }) {
   console.log("Sending POST request with encoded row data...");
 
-  // Build tags array dynamically
+    // Build tags array dynamically
   const tags = [];
 
   // Add category tag if available
   if (additionalContext?.Category) {
     tags.push(additionalContext.Category);
   }
+
+
 
   const reqBody = {
     source: "",
@@ -1306,8 +1279,8 @@ async function postAfterEncoding({
   };
 
   try {
-    console.log(colorize("TO BE PUSHED TO THE CRM", "blue"));
-    console.log(reqBody);
+    console.log(colorize("TO BE PUSHED TO THE CRM", "blue"))
+    console.log(reqBody)
     // const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
 
     // const response = await axios.post(
@@ -1426,10 +1399,6 @@ async function encodeLeadFromRequest({
 }) {
   try {
     const { sheets } = await initGoogleClients();
-    console.log(`Spreadsheet Id: ${spreadsheetId}`);
-    console.log(`Spreadsheet Name: ${sheetName}`);
-    console.log(`Lead Data:`);
-    console.log(leadData);
 
     // 1 Ensure tab exists
     const meta = await sheets.spreadsheets.get({ spreadsheetId });
@@ -1538,7 +1507,7 @@ async function encodeLeadFromRequest({
       return { success: false, reason: "duplicate-lead+reply" };
     }
 
-    // 5️ Append row to Google Sheet
+    // 5️⃣ Append row to Google Sheet
     const rowValues = headers.map((h) => rowJson[h] ?? "");
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -1548,9 +1517,9 @@ async function encodeLeadFromRequest({
       requestBody: { values: [rowValues] },
     });
 
-    console.log("Lead successfully appended to Google Sheet.");
+    console.log("✅ Lead successfully appended to Google Sheet.");
 
-    // 6️ Mark as done in DB (optional)
+    // 6️⃣ Mark as done in DB (optional)
     if (leadData.id) {
       await con.query(
         `UPDATE toBeEncodedLeads SET isDone = true WHERE id = $1`,
@@ -1559,93 +1528,17 @@ async function encodeLeadFromRequest({
       console.log(`Lead ID ${leadData.id} marked as done.`);
     }
 
-    // 7️ Call postAfterEncoding
-    await incrementApprovedEncodingLead({ createdAt: leadData.created_at });
+    // 7️⃣ Call postAfterEncoding
+    await postAfterEncoding({ rowJson, setErrorOccurred, setErrorContext });
 
     return { success: true };
   } catch (error) {
-    console.error("Error encoding lead:", error.message);
+    console.error("❌ Error encoding lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
     if (setErrorContext) setErrorContext(error.message);
     return { success: false, error: error.message };
   }
 }
-
-async function incrementApprovedEncodingLead({ createdAt }) {
-  try {
-    // Extract only the date part (YYYY-MM-DD)
-    const approvalDate = new Date(createdAt).toISOString().split("T")[0];
-
-    // Upsert logic: insert if not exists, else increment count
-    await con.query(
-      `
-      INSERT INTO approved_encoding_lead (approval_date, approved_count)
-      VALUES ($1, 1)
-      ON CONFLICT (approval_date)
-      DO UPDATE SET approved_count = approved_encoding_lead.approved_count + 1
-      `,
-      [approvalDate]
-    );
-
-    console.log(`Approved count updated for ${approvalDate}`);
-  } catch (err) {
-    console.error("Error updating approved_encoding_lead:", err.message);
-  }
-}
-
-// async function markToBeApprovedLead(id) {
-//   try {
-//     const query = `
-//       UPDATE tobeencodedleads
-//       SET isdone = true
-//       WHERE id = $1
-//       RETURNING *;
-//     `;
-
-//     const result = await con.query(query, [id]);
-
-//     if (result.rowCount === 0) {
-//       console.warn(`No record found with id=${id}`);
-//       return null;
-//     }
-
-//     console.log(`Successfully updated tobeencodedleads id=${id} (isdone = true)`);
-//     return result.rows[0];
-//   } catch (err) {
-//     console.error(`Error updating tobeencodedleads id=${id}:`, err.message);
-//     throw err;
-//   }
-// }
-
-markToBeApprovedLead = async (req, res) => {
-  const { id } = req.body;
-  console.log("markToBeApprovedLead");
-  console.log(id);
-  try {
-    const query = `
-      UPDATE tobeencodedleads
-      SET isdone = true
-      WHERE id = $1
-      RETURNING *;
-    `;
-
-    const result = await con.query(query, [id]);
-
-    if (result.rowCount === 0) {
-      console.warn(`No record found with id=${id}`);
-      return null;
-    }
-
-    console.log(
-      `Successfully updated tobeencodedleads id=${id} (isdone = true)`
-    );
-    return responseReturn(res, 200, {message: "Denied Successfully"});
-    // return result.rows[0];
-  } catch (err) {
-   return responseReturn(res, 500, {error: "Something Went Wrong, please try again"});
-  }
-};
-
 module.exports = {
   normalizeRow,
   isAddressUsBased,
@@ -1656,5 +1549,4 @@ module.exports = {
   fetchLeadsPage,
   getNextCursor,
   encodeLeadFromRequest,
-  markToBeApprovedLead,
 };

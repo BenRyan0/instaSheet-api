@@ -4,10 +4,7 @@ function initState({
   maxEmails,
   maxPages,
   aiInterestThreshold,
-
 }) {
-
-
   return {
     // Quantities we’ll mutate
     pagesFetched: 0,
@@ -23,26 +20,27 @@ function initState({
     stoppedEarly: false,
     // Caps & thresholds
     maxEmails,
-    maxEmailsCap : maxEmails,
+    maxEmailsCap: maxEmails,
     maxPages,
     maxPagesCap: maxPages,
     aiInterestThreshold,
-    totalEncoded : 0,
-    totalInterestedLLM : 0,
+    totalEncoded: 0,
+    totalInterestedLLM: 0,
+    totalToBeApproved: 0,
 
     /**
      * Call this once per page fetched.
      */
     nextPage() {
-      this.pagesFetched++
+      this.pagesFetched++;
     },
 
     /**
      * Call this each time you finish fetching replies for one lead.
      */
     nextLead() {
-      this.processedLeads++
-      this.distinctLeadsChecked++
+      this.processedLeads++;
+      this.distinctLeadsChecked++;
     },
 
     /**
@@ -52,18 +50,18 @@ function initState({
      * @param {boolean} hadNewInterest  true if lead wasn’t previously “interested”
      */
     collect(row, hadNewInterest) {
-      this.rows.push(row)
-      this.totalEmailsCollected++
-      if (hadNewInterest) this.interestedLeadCount++
+      this.rows.push(row);
+      this.totalEmailsCollected++;
+      if (hadNewInterest) this.interestedLeadCount++;
     },
 
     /**
      * Flip this flag when you hit a cap and want to break your loop.
      */
     stop() {
-      this.stoppedEarly = true
+      this.stoppedEarly = true;
     },
-  }
+  };
 }
 
 /**
@@ -74,7 +72,7 @@ function shouldContinue(state) {
     !state.stoppedEarly &&
     state.totalEmailsCollected < state.maxEmails &&
     state.pagesFetched < state.maxPages
-  )
+  );
 }
 
 /**
@@ -92,14 +90,14 @@ function summarizeState(state) {
     maxEmailsCap: state.maxEmails,
     maxPagesCap: state.maxPages,
     aiInterestThreshold: state.aiInterestThreshold,
-    totalEncoded : state.totalEncoded,
-    errorContext : state.errorContext  | ""
-    
-  }
+    totalEncoded: state.totalEncoded,
+    totalToBeApproved: state.totalToBeApproved,
+    errorContext: state.errorContext | "",
+  };
 }
 
 module.exports = {
   initState,
   shouldContinue,
   summarizeState,
-}
+};

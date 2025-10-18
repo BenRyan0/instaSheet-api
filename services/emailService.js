@@ -26,7 +26,7 @@ async function _awaitRateLimit() {
 
 async function fetchRepliesForLead(
   lead,
-  { campaignId, perLeadLimit, authHeaders, delayMs, is_unread },
+  { perLeadLimit, authHeaders, delayMs = 0, is_unread },
   setErrorContext,
   setErrorOccurred
 ) {
@@ -36,61 +36,126 @@ async function fetchRepliesForLead(
     return { lead, emails: [], skipped: true, reason: "No replies" };
   }
 
-  // Build query parameters
+  // Build query parameters (no campaign_id)
   const params = {
+    lead: lead.email || lead.payload?.email,
+    email_type: "received",
+    sort_order: "desc",
     limit: perLeadLimit,
-    leadEmail: lead.email || lead.payload?.email,
-    // campaign: campaignId || lead.campaign,
+    i_status: 1,
+    is_unread: is_unread ?? false,
   };
 
   console.log("fetchRepliesForLead START", params);
 
   try {
-    // Global rate limit (e.g., max 20/min)
+    // Global rate-limit guard
     await _awaitRateLimit();
 
-    // Optional delay between requests
-    const delay = Number(delayMs ?? process.env.REPLIES_REQUEST_DELAY_MS ?? 0);
-    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    // Optional inter-request delay
+    if (delayMs > 0) {
+      await new Promise((res) => setTimeout(res, Number(delayMs)));
+    }
 
-    // Fetch replies from Instantly API
+    // Fetch from Instantly
     const response = await axios.get(
-      `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
+      "https://api.instantly.ai/api/v2/emails",
       {
         headers: authHeaders,
+        params,
       }
     );
-    // const response = await axios.get(
-    //   `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
-    //   {
-    //     headers: authHeaders,
-    //   }
-    // );
 
     const emails = normalizeLeadsArray(response.data || []);
-    const emailContent = emails[0]?.body?.text || "";
+    const firstBody = emails[0]?.body?.text || "";
+    const wordCount = await countWords(firstBody);
 
-    const emailWordCount = await countWords(emailContent);
-    if (emailWordCount < 20) {
-      console.log(
-        colorize(
-          `Email for ${params.leadEmail} fetched -> ${emailWordCount} words`,
-          "cyan"
-        )
-      );
-    }
+    console.log(
+      colorize(
+        `Fetched ${emails.length} replies for ${params.lead} -> ${wordCount} words in first email`,
+        "cyan"
+      )
+    );
 
     return { lead, emails, success: true };
   } catch (err) {
-    console.error(
-      `fetchRepliesForLead ERROR for ${params.leadEmail}:`,
-      err.message
-    );
+    console.error(`fetchRepliesForLead ERROR for ${lead.email}:`, err.message);
     if (setErrorOccurred) setErrorOccurred(true);
     if (setErrorContext) setErrorContext(err.message);
     return { lead, emails: [], error: err.message, success: false };
   }
 }
+
+
+
+// CAMPAIGN ID LIMITED
+// async function fetchRepliesForLead(
+//   lead,
+//   { campaignId, perLeadLimit, authHeaders, delayMs, is_unread },
+//   setErrorContext,
+//   setErrorOccurred
+// ) {
+//   // Skip leads with no replies
+//   if (!lead.email_reply_count || lead.email_reply_count === 0) {
+//     console.log(`[SKIP] No replies for lead: ${lead.email}`);
+//     return { lead, emails: [], skipped: true, reason: "No replies" };
+//   }
+
+//   // Build query parameters
+//   const params = {
+//     limit: perLeadLimit,
+//     leadEmail: lead.email || lead.payload?.email,
+//     // campaign: campaignId || lead.campaign,
+//   };
+
+//   console.log("fetchRepliesForLead START", params);
+
+//   try {
+//     // Global rate limit (e.g., max 20/min)
+//     await _awaitRateLimit();
+
+//     // Optional delay between requests
+//     const delay = Number(delayMs ?? process.env.REPLIES_REQUEST_DELAY_MS ?? 0);
+//     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+
+//     // Fetch replies from Instantly API
+//     const response = await axios.get(
+//       `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
+//       {
+//         headers: authHeaders,
+//       }
+//     );
+//     // const response = await axios.get(
+//     //   `https://api.instantly.ai/api/v2/emails?lead=${lead.email}&campaign_id=${campaignId}&email_type=received&sort_order=desc&limit=${perLeadLimit}&i_status=1&is_unread=${is_unread}`,
+//     //   {
+//     //     headers: authHeaders,
+//     //   }
+//     // );
+
+//     const emails = normalizeLeadsArray(response.data || []);
+//     const emailContent = emails[0]?.body?.text || "";
+
+//     const emailWordCount = await countWords(emailContent);
+//     if (emailWordCount < 20) {
+//       console.log(
+//         colorize(
+//           `Email for ${params.leadEmail} fetched -> ${emailWordCount} words`,
+//           "cyan"
+//         )
+//       );
+//     }
+
+//     return { lead, emails, success: true };
+//   } catch (err) {
+//     console.error(
+//       `fetchRepliesForLead ERROR for ${params.leadEmail}:`,
+//       err.message
+//     );
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     return { lead, emails: [], error: err.message, success: false };
+//   }
+// }
 
 module.exports = {
   fetchRepliesForLead,

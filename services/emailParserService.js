@@ -59,6 +59,9 @@ async function extractReply({
       return normalizeSchema({});
     }
 
+    console.log("cleanEmailContent")
+    console.log(cleanEmailContent)
+
     const response = await fetch("http://localhost:5678/webhook/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

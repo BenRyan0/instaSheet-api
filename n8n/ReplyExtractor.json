@@ -1,0 +1,154 @@
+{
+  "name": "Chat with local LLMs using n8n and Ollama",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "gemma3:12b",
+        "options": {
+          "format": "json"
+        }
+      },
+      "id": "20be25f4-5e4e-47d1-a320-8d3d19f8d632",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "position": [
+        784,
+        608
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "ollamaApi": {
+          "id": "jJfkrmg0hnovptxf",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "message",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        640,
+        464
+      ],
+      "id": "a4c0c399-3bd4-41c6-8b89-0ed030e599dd",
+      "name": "Webhook",
+      "webhookId": "2ee5c7ba-3de9-48b2-8781-3b6a72d012b9"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.output }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1120,
+        464
+      ],
+      "id": "e43dd1cb-b397-453d-a610-b3c1725dd627",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n  \"emailContent\": \"{{ $json.body.emailContent }}\",\n  \"content_preview\": \"{{ $json.body.content_preview }}\"\n}\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You extract the latest email reply.\n\nInput JSON:\n- \"content_preview\": a snippet from the start of the reply\n- \"emailContent\": the full email thread\n\nFind the reply text that starts with or matches the preview, and stop at the quoted section (e.g. lines starting with \"On\", \"From:\", or \"-----Original Message-----\").  \nRemove quoted text, signatures, and metadata.  \nReturn JSON only:\n\n{\n  \"reply\": \"string\"\n}\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        416
+      ],
+      "id": "d5914a16-9d75-4691-a094-f3a7093f0464",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "alibaba/tongyi-deepresearch-30b-a3b:free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        656,
+        656
+      ],
+      "id": "6ceadbcf-942c-4fe6-81a9-4c1490762b9b",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "P0WTgTdCQ4eHTOPc",
+          "name": "OpenRouter account 3"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "bc140aa2-5ec7-4860-9ab3-fc709a0e443b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0d6a795e7e8819e526ed71f884be6d8bf8391c65de93980edce108f999ae5589"
+  },
+  "id": "gYChWDRVt0vyoNRV",
+  "tags": []
+}

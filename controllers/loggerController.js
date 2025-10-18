@@ -65,6 +65,7 @@ class loggerController {
         max_pages_cap,
         ai_interest_threshold,
         total_encoded,
+         total_tobe_approved,
         created_at
       FROM encoding_runs
       ORDER BY created_at DESC

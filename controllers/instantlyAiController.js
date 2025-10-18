@@ -122,7 +122,7 @@ class instantlyAiController {
     setErrorOccurred,
     setErrorContext,
     addToTotalEncoded,
-    addTotalToBeApproved
+    addTotalToBeApproved,
   }) {
     console.log(colorize("Processing lead Email ...", "blue"));
     console.log("additionalContext");
@@ -269,10 +269,16 @@ class instantlyAiController {
         cursor = getNextCursor(page);
 
         const batch = filterNewLeads(leads, seen);
-        console.log(batch)
-        console.log("batch")
+        console.log(batch);
+        console.log("batch");
 
-        if (batch.length === 0) continue;
+        if (batch.length === 0) {
+          // console.log("[SKIP] Empty batch, not incrementing page count.");
+          continue;
+        }
+
+        // Only increment page when we actually have new leads
+        // state.nextPage();
 
         // Sequentially process each lead: wait for replies and email processing before next lead
         for (const lead of batch) {
@@ -340,7 +346,22 @@ class instantlyAiController {
               state.stop();
               break;
             }
+            // Skip emails older than 2 weeks
+            const emailTimestamp = email?.timestamp_email
+              ? new Date(email.timestamp_email)
+              : null;
+            const now = new Date();
+            const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
 
+            if (emailTimestamp && now - emailTimestamp > TWO_WEEKS_MS) {
+              console.log(
+                `[skip] Email from ${emailTimestamp.toISOString()} is older than 2 weeks, skipping.`
+              );
+              if (key) {
+                await markProcessed(key, redisClient, dedupKey, seen);
+              }
+              continue;
+            }
             // Per-email message-id dedup removed; rely solely on lead email/id key
 
             // Skip very long emails (>500 words) and mark as processed to avoid future repeats
@@ -369,6 +390,8 @@ class instantlyAiController {
               // the ClientId and Category to be placed in the tags
               additionalContext = {
                 ClientID: lead?.id ?? "N/A",
+                TimeStamp: email?.timestamp_email ?? new Date().toISOString(),
+                // timestamp_email
                 Category:
                   lead?.payload?.category ?? lead?.category ?? "Uncategorized",
               };
@@ -431,7 +454,7 @@ class instantlyAiController {
                   addToTotalEncoded: this.addToTotalEncoded.bind(this),
                   setErrorOccurred: this.setErrorOccurred.bind(this),
                   setErrorContext: this.setErrorContext.bind(this),
-                  addTotalToBeApproved : this.addTotalToBeApproved.bind(this)
+                  addTotalToBeApproved: this.addTotalToBeApproved.bind(this),
                 });
               } catch (e) {
                 console.warn("processEmailRow threw", {

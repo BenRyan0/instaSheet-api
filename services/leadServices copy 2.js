@@ -20,8 +20,6 @@ const regexes = Object.fromEntries(
   ])
 );
 
-const FormData = require('form-data'); // only in Node
-
 const FILTER_LEAD_INTERESTED_BASE = {
   lt_interest_status: 1,
   email_reply_count: { gt: 0 },
@@ -1258,10 +1256,16 @@ async function appendToLeadDatabase({
   }
 }
 
-async function postAfterEncoding(args) {
-  const { rowJson, sheetUrl, additionalContext } = args;
+async function postAfterEncoding({
+  rowJson,
+  sheetUrl,
+  additionalContext,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  console.log("Sending POST request with encoded row data...");
 
-    // Build tags array dynamically
+  // Build tags array dynamically
   const tags = [];
   if (additionalContext?.Category) {
     tags.push(additionalContext.Category);
@@ -1292,125 +1296,50 @@ async function postAfterEncoding(args) {
     is_public: sheetUrl || "",
   };
 
-  // 2. Build FormData
-  const form = new FormData();
-  for (const [key, value] of Object.entries(reqBody)) {
-    if (Array.isArray(value)) {
-      value.forEach(v => form.append(`${key}[]`, v));
-    } else {
-      form.append(key, value);
-    }
-  }
-
-  // 3. Auth headers
   const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
 
-  // 4. Merge FormData headers if available
-  const formHeaders = typeof form.getHeaders === 'function'
-    ? form.getHeaders()
-    : {}; // browser FormData → Axios handles headers
+  let attempts = 0;
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
 
-  const headers = { ...authHeaders, ...formHeaders };
+  while (attempts < maxRetries) {
+    try {
+      const response = await axios.post(
+        "https://govacrm.com/api/leads",
+        reqBody,
+        { headers: authHeaders }
+      );
 
-  // 5. Send request
-  try {
-    const response = await axios.post(
-      'https://govacrm.com/api/leads',
-      form,
-      { headers }
-    );
-    console.log("response")
-    console.log(response)
-    return response.status === 200;
-  } catch (err) {
-    console.log(err)
-    // handle errors…
-    return false;
+      console.log("POST request to CRM completed:", response.status);
+
+      if (response.status === 200) {
+        return true; // Success, stop retrying
+      } else {
+        throw new Error(`Unexpected status code: ${response.status}`);
+      }
+
+    } catch (err) {
+      attempts++;
+      console.error(
+        `Attempt ${attempts} failed: ${err.message}${
+          attempts < maxRetries ? " — retrying..." : ""
+        }`
+      );
+
+      if (attempts >= maxRetries) {
+        if (setErrorOccurred) setErrorOccurred(true);
+        if (setErrorContext) setErrorContext(err.message);
+        console.error("All retry attempts failed.");
+        return false;
+      }
+
+      // Wait before retrying (exponential backoff)
+      const delay = baseDelay * Math.pow(2, attempts - 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 }
 
-
-// async function postAfterEncoding({
-//   rowJson,
-//   sheetUrl,
-//   additionalContext,
-//   setErrorOccurred,
-//   setErrorContext,
-// }) {
-//   console.log("Sending POST request with encoded row data...");
-
-//   // Build tags array
-//   const tags = [];
-//   if (additionalContext?.Category) {
-//     tags.push(additionalContext.Category);
-//   }
-
-//   // Build the flat payload object
-//   const reqBody = {
-//     source: "",
-//     status: "",
-//     name: `${rowJson["lead first name"] || ""} ${
-//       rowJson["lead last name"] || ""
-//     }`.trim(),
-//     assigned: "",
-//     clientid: additionalContext.ClientID || "",
-//     tags,  
-//     title: "",
-//     email: rowJson["lead email"] || "",
-//     website: rowJson.details || "",
-//     phonenumber: (rowJson["company phone#"] || "").replace(/\D/g, ""),
-//     company: rowJson.company || "",
-//     address: rowJson.address || "",
-//     city: rowJson.city || "",
-//     zip: rowJson.zip || "",
-//     state: rowJson.state || "",
-//     country: "",
-//     default_language: "",
-//     description: (rowJson["email reply"] || "").trim(),
-//     custom_contact_date: "",
-//     is_public: sheetUrl ? 1 : 0,
-//   };
-
-//   // Convert payload to FormData
-//   const form = new FormData();
-//   for (const [key, value] of Object.entries(reqBody)) {
-//     if (Array.isArray(value)) {
-//       // append each tag individually
-//       value.forEach(v => form.append(`${key}[]`, v));
-//     } else {
-//       form.append(key, value);
-//     }
-//   }
-
-//   try {
-//     console.log("Prepared FormData payload:");
-//     console.log(reqBody);
-
-//     // Merge auth headers with multipart boundary headers
-//     const headers = {
-//       ...getAuthHeaders(process.env.PERFEX_CRM_API_KEY),
-//       ...form.getHeaders(),
-//     };
-
-//     const response = await axios.post(
-//       "https://govacrm.com/api/leads",
-//       form,
-//       { headers }
-//     );
-
-//     console.log("POST request to CRM completed:", response.status);
-//     if (response.status !== 200 && setErrorOccurred) {
-//       setErrorOccurred(true);
-//     }
-
-//     return response.status === 200;
-//   } catch (err) {
-//     if (setErrorOccurred) setErrorOccurred(true);
-//     if (setErrorContext) setErrorContext(err.response?.data || err.message);
-//     console.error("Failed to send POST request:", err.response?.data || err.message);
-//     return false;
-//   }
-// }
 // async function postAfterEncoding({
 //   rowJson,
 //   sheetUrl,
@@ -1422,11 +1351,13 @@ async function postAfterEncoding(args) {
 
 //   // Build tags array dynamically
 //   const tags = [];
+
+//   // Add category tag if available
 //   if (additionalContext?.Category) {
 //     tags.push(additionalContext.Category);
 //   }
 
-//  const reqBody = {
+//   const reqBody = {
 //     source: "GOVA",
 //     status: "NEW",
 //     name: `test ${rowJson["lead first name"] || ""} ${
@@ -1451,50 +1382,170 @@ async function postAfterEncoding(args) {
 //     is_public: sheetUrl || "",
 //   };
 
-//   const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
-
-//   let attempts = 0;
-//   const maxRetries = 3;
-//   const baseDelay = 1000; // 1 second
-
-//   while (attempts < maxRetries) {
-//     try {
-//       const response = await axios.post(
-//         "https://govacrm.com/api/leads",
-//         reqBody,
-//         { headers: authHeaders }
-//       );
-
-//       console.log("POST request to CRM completed:", response.status);
-
-//       if (response.status === 200) {
-//         return true; // Success, stop retrying
-//       } else {
-//         throw new Error(`Unexpected status code: ${response.status}`);
-//       }
-
-//     } catch (err) {
-//       attempts++;
-//       console.error(
-//         `Attempt ${attempts} failed: ${err.message}${
-//           attempts < maxRetries ? " — retrying..." : ""
-//         }`
-//       );
-
-//       if (attempts >= maxRetries) {
-//         if (setErrorOccurred) setErrorOccurred(true);
-//         if (setErrorContext) setErrorContext(err.message);
-//         console.error("All retry attempts failed.");
-//         return false;
-//       }
-
-//       // Wait before retrying (exponential backoff)
-//       const delay = baseDelay * Math.pow(2, attempts - 1);
-//       await new Promise((resolve) => setTimeout(resolve, delay));
-//     }
+//   try {
+//     console.log(colorize("TO BE PUSHED TO THE CRM", "blue"));
+//     console.log(reqBody);
+//     return true;
+//   } catch (err) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     console.error("Failed to send POST request:", err.message);
 //   }
 // }
 
+// async function encodeLeadFromRequest({
+//   spreadsheetId,
+//   sheetName,
+//   leadData, // from req.body.lead
+//   setErrorOccurred,
+//   setErrorContext,
+// }) {
+//   try {
+//     const { sheets } = await initGoogleClients();
+//     console.log(`Spreadsheet Id: ${spreadsheetId}`);
+//     console.log(`Spreadsheet Name: ${sheetName}`);
+//     console.log(`Lead Data:`);
+//     console.log(leadData);
+
+//     // 1 Ensure tab exists
+//     const meta = await sheets.spreadsheets.get({ spreadsheetId });
+//     const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+
+//     if (!existingTabs.includes(sheetName)) {
+//       await sheets.spreadsheets.batchUpdate({
+//         spreadsheetId,
+//         requestBody: {
+//           requests: [{ addSheet: { properties: { title: sheetName } } }],
+//         },
+//       });
+//       console.log(`Created new sheet tab: ${sheetName}`);
+//     }
+
+//     // 2️ Construct your rowJson from the incoming leadData
+//     const rowJson = {
+//       "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
+//       "For scheduling": leadData.for_scheduling || "",
+//       "sales person": leadData.sales_person || "",
+//       "sales person email": leadData.sales_person_email || "",
+//       company: leadData.company || "",
+//       "company phone#": leadData.company_phone || "none",
+//       "phone#from email": leadData.phone_from_email || "none",
+//       "lead first name": leadData.lead_first_name || "",
+//       "lead last name": leadData.lead_last_name || "",
+//       "lead email": leadData.lead_email || "",
+//       "Column 2": leadData.lead_email || "",
+//       "email reply": leadData.email_reply || "",
+//       "phone 1": leadData.phone_1 || "",
+//       "#": leadData.phone_number || leadData.phone_1 || "",
+//       phone2: leadData.phone_2 || "",
+//       address: leadData.address || "",
+//       city: leadData.city || "",
+//       state: leadData.state || "",
+//       zip: leadData.zip || "",
+//       details: leadData.details || "",
+//       "Email Signature": leadData.email_signature || "",
+//       "linkedin link": leadData.linkedin_link || "none",
+//       "2nd contact person linked":
+//         leadData.second_contact_person_linked || "none",
+//       "status after the call": leadData.status_after_call || "none",
+//       "number of calls spoken with the leads":
+//         leadData.number_of_calls_spoken_with_leads || "",
+//       "@dropdown": leadData.dropdown || "",
+//     };
+
+//     // 3️ Get existing rows
+//     const resp = await sheets.spreadsheets.values.get({
+//       spreadsheetId,
+//       range: sheetName,
+//     });
+
+//     const allValues = resp.data.values || [];
+//     let headers = allValues[0] || [];
+//     const expectedHeaders = Object.keys(rowJson);
+
+//     // If headers missing or mismatched, reset headers
+//     if (!headers.length || headers.length !== expectedHeaders.length) {
+//       headers = expectedHeaders;
+//       await sheets.spreadsheets.values.update({
+//         spreadsheetId,
+//         range: `${sheetName}!A1`,
+//         valueInputOption: "RAW",
+//         requestBody: { values: [headers] },
+//       });
+//       console.log("Added or corrected headers in sheet.");
+//     }
+
+//     // 4️ Deduplication logic
+//     const leadIdx = headers.indexOf("lead email");
+//     const replyIdx = headers.indexOf("email reply");
+
+//     if (leadIdx === -1 || replyIdx === -1) {
+//       throw new Error(
+//         `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
+//       );
+//     }
+
+//     const existingLeadEmails = new Set();
+//     const existingPairs = new Set();
+
+//     for (let i = 1; i < allValues.length; i++) {
+//       const row = allValues[i];
+//       const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
+//       const emailReply = (row[replyIdx] || "").toLowerCase().trim();
+//       if (leadEmail) existingLeadEmails.add(leadEmail);
+//       existingPairs.add(`${leadEmail}|${emailReply}`);
+//     }
+
+//     const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
+//     const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
+
+//     if (existingLeadEmails.has(newLeadEmail)) {
+//       console.log(
+//         `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
+//       );
+//       return { success: false, reason: "duplicate-lead-email" };
+//     }
+
+//     const pairKey = `${newLeadEmail}|${newEmailReply}`;
+//     if (existingPairs.has(pairKey)) {
+//       console.log(
+//         `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+//       );
+//       return { success: false, reason: "duplicate-lead+reply" };
+//     }
+
+//     // 5️ Append row to Google Sheet
+//     const rowValues = headers.map((h) => rowJson[h] ?? "");
+//     await sheets.spreadsheets.values.append({
+//       spreadsheetId,
+//       range: `${sheetName}!A:A`,
+//       valueInputOption: "RAW",
+//       insertDataOption: "INSERT_ROWS",
+//       requestBody: { values: [rowValues] },
+//     });
+
+//     console.log("Lead successfully appended to Google Sheet.");
+
+//     // 6️ Mark as done in DB (optional)
+//     if (leadData.id) {
+//       await con.query(
+//         `UPDATE toBeEncodedLeads SET isDone = true WHERE id = $1`,
+//         [leadData.id]
+//       );
+//       console.log(`Lead ID ${leadData.id} marked as done.`);
+//     }
+
+//     // 7️ Call postAfterEncoding
+//     await incrementApprovedEncodingLead({ createdAt: leadData.created_at });
+
+//     return { success: true };
+//   } catch (error) {
+//     console.error("Error encoding lead:", error.message);
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(error.message);
+//     return { success: false, error: error.message };
+//   }
+// }
 
 async function encodeLeadFromRequest({
   spreadsheetId,

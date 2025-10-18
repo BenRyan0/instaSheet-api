@@ -14,4 +14,10 @@ con.connect()
   .then(() => console.log("PostgreSQL connected"))
   .catch(err => console.error("Connection error", err.stack));
 
+// Simulated release (closes connection)
+con.release = async () => {
+  await con.end();
+  console.log("PostgreSQL connection released");
+};
+
 module.exports = con;

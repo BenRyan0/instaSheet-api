@@ -224,12 +224,6 @@ class instantlyAiController {
     this.errorOccurred = false;
     try {
       const { campaignId, opts, sheetName } = req.body;
-      if (!campaignId || Array.isArray(campaignId)) {
-        return responseReturn(res, 400, {
-          error: "Invalid or missing campaignId (1 campaign Id expected)",
-        });
-      }
-
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
@@ -246,7 +240,6 @@ class instantlyAiController {
 
       // Progress imited (socket.io)
       emitProgress(state);
-
       let cursor = null;
 
       // checking if the loop has reached its max limits
@@ -256,7 +249,7 @@ class instantlyAiController {
 
         // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
         const page = await fetchLeadsPage({
-          campaignId,
+          // campaignId,
           cursor,
           pageLimit: opts.pageLimit,
           aiThreshold: opts.aiInterestThreshold,
@@ -283,7 +276,7 @@ class instantlyAiController {
         // Sequentially process each lead: wait for replies and email processing before next lead
         for (const lead of batch) {
           const result = await fetchRepliesForLead(lead, {
-            campaignId,
+            // campaignId,
             perLeadLimit: opts.emailsPerLead,
             authHeaders,
             delayMs: opts.delayMs,

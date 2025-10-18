@@ -30,6 +30,9 @@ async function fetchRepliesForLead(
   setErrorContext,
   setErrorOccurred
 ) {
+
+  console.log("lead----------")
+  console.log(lead)
   // Skip leads with no replies
   if (!lead.email_reply_count || lead.email_reply_count === 0) {
     console.log(`[SKIP] No replies for lead: ${lead.email}`);
@@ -42,8 +45,8 @@ async function fetchRepliesForLead(
     email_type: "received",
     sort_order: "desc",
     limit: perLeadLimit,
-    i_status: 1,
-    is_unread: is_unread ?? false,
+    // i_status: 1,
+    // is_unread: is_unread ?? false,
   };
 
   console.log("fetchRepliesForLead START", params);
@@ -65,6 +68,10 @@ async function fetchRepliesForLead(
         params,
       }
     );
+
+    console.log("response")
+    console.dir(response.data, { depth: null, colors: true });
+
 
     const emails = normalizeLeadsArray(response.data || []);
     const firstBody = emails[0]?.body?.text || "";

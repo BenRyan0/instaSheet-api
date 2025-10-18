@@ -27,57 +27,100 @@ const FILTER_LEAD_INTERESTED_BASE = {
   email_reply_count: { gt: 0 },
 };
 
+async function fetchLeadsPage({
+  pageLimit = 2,
+  authHeaders,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  try {
+    // 1️⃣ Get unprocessed emails
+    const { rows: emails } = await con.query(`
+      SELECT id, campaign_id, email
+      FROM tobe_processed_campaign_emails
+      WHERE is_processed = FALSE
+      ORDER BY created_at DESC
+      LIMIT $1;
+    `, [pageLimit]);
+
+    if (emails.length === 0) {
+      console.log('⚠️ No unprocessed emails found.');
+      return {
+        items: [],
+        next_starting_after: null,
+        message: 'No unprocessed emails found.',
+      };
+    }
+
+    const contactList = emails.map(e => e.email);
+    console.log(`📤 Sending POST to Instantly API with contacts:`, contactList);
+
+    // 2️⃣ POST request via axios
+    const response = await axios.post(
+      'https://api.instantly.ai/api/v2/leads/list',
+      {
+        contacts: contactList,
+        limit: pageLimit,
+      },
+      {
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    // 3️⃣ Mark emails as processed
+    const processedIds = emails.map(e => e.id);
+    await con.query(`
+      UPDATE tobe_processed_campaign_emails
+      SET is_processed = TRUE, updated_at = NOW()
+      WHERE id = ANY($1::int[]);
+    `, [processedIds]);
+
+    console.log(`✅ Marked ${processedIds.length} emails as processed.`);
+
+    // ✅ 4️⃣ Return Instantly API data (so your caller gets it)
+    return response.data;
+
+  } catch (err) {
+    console.error('❌ Error fetching leads batch:', err.message);
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext('fetchLeadsPage');
+    throw err;
+  } finally {
+    console.log('🏁 fetchLeadsPage finished (connection remains open).');
+  }
+}
+
+
 // async function fetchLeadsPage({
-//   campaignId,
 //   cursor = null,
 //   pageLimit,
 //   authHeaders,
 //   setErrorContext,
 //   setErrorOccurred,
 // }) {
-//   console.log("FetchLeadsPage -init");
+//   console.log("FetchAllInterestedLeadsPage -init");
 
-//   const redisCursorKey = `insta:campaign_cursor:${campaignId}:${pageLimit}`;
-//   const redisFailCountKey = `insta:campaign_cursor_failcount:${campaignId}:${pageLimit}`;
-//   const redisMetaKey = `insta:campaign_meta`;
+//   const redisCursorKey = `insta:global_cursor:${pageLimit}`;
+//   const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
 
 //   try {
-//     // Step 1: Check last used campaign + pageLimit
-//     const lastMeta = JSON.parse((await redisClient.get(redisMetaKey)) || "{}");
-
-//     const metaChanged =
-//       lastMeta.campaignId !== campaignId || lastMeta.pageLimit !== pageLimit;
-
-//     if (metaChanged) {
-//       console.log(
-//         `Campaign/pageLimit changed: last=${JSON.stringify(
-//           lastMeta
-//         )}, current={campaignId:${campaignId}, pageLimit:${pageLimit}}`
-//       );
-//       console.log("Resetting cursor and fail count...");
-//       await redisClient.del(redisCursorKey);
-//       await redisClient.del(redisFailCountKey);
-//     }
-
-//     // Step 2: Get stored cursor (if still valid)
+//     // Step 1: Get stored cursor (if any)
 //     let storedCursor = await redisClient.get(redisCursorKey);
 //     const effectiveCursor = storedCursor || cursor || "";
 
-//     console.log(
-//       `Using cursor for campaign ${campaignId} (limit=${pageLimit}):`,
-//       effectiveCursor
-//     );
+//     console.log(`Using global cursor (limit=${pageLimit}):`, effectiveCursor);
 
-//     // Step 3: Build request
+//     // Step 2: Build request
 //     const body = {
 //       filter: "FILTER_LEAD_INTERESTED",
-//       campaign: campaignId,
-//       in_campaign: true,
 //       limit: pageLimit,
 //       starting_after: effectiveCursor,
 //     };
 
-//     // Step 4: Send API request
+//     // Step 3: Send API request
 //     const response = await axios.post(
 //       `https://api.instantly.ai/api/v2/leads/list`,
 //       body,
@@ -86,37 +129,21 @@ const FILTER_LEAD_INTERESTED_BASE = {
 //       }
 //     );
 
-//     // console.log("Parsed response:");
-//     // console.dir(response.data, { depth: null, colors: true });
-//     // console.log("Response received for campaign:", campaignId);
-//     // console.log(`Fetched ${response.data?.items?.length || 0} leads`);
-
 //     const leads = response.data?.items || [];
 
-//     // Log each email
 //     console.log(colorize("Fetched Leads ...", "cyan"));
 //     leads.forEach((lead, index) => {
 //       console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
 //     });
 
-//     // Step 5: Handle cursor logic
+//     // Step 4: Handle cursor logic
 //     if (response.data?.next_starting_after) {
 //       const newCursor = response.data.next_starting_after;
 
-//       // await redisClient.set(redisCursorKey, newCursor, { EX: 3600 }); // 1 hour expiry
 //       await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
 //       await redisClient.del(redisFailCountKey);
 
-//       // Store latest campaign + pageLimit metadata
-//       await redisClient.set(
-//         redisMetaKey,
-//         JSON.stringify({ campaignId, pageLimit }),
-//         { EX: 1800 }
-//       );
-
-//       console.log(
-//         `Updated Redis cursor for ${campaignId} (limit=${pageLimit}): ${newCursor}`
-//       );
+//       console.log(`Updated global Redis cursor: ${newCursor}`);
 //     } else {
 //       console.log("No new cursor returned by API — keeping current cursor.");
 
@@ -124,104 +151,24 @@ const FILTER_LEAD_INTERESTED_BASE = {
 //         (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
 //       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
 
-//       console.log(
-//         `No-cursor streak for ${campaignId} (limit=${pageLimit}): ${failCount} time(s)`
-//       );
+//       console.log(`No-cursor streak: ${failCount} time(s)`);
 
 //       if (failCount >= 3) {
-//         console.warn(
-//           `No new cursor for ${campaignId} after 3 attempts — resetting cursor.`
-//         );
+//         console.warn("No new cursor after 3 attempts — resetting cursor.");
 //         await redisClient.del(redisCursorKey);
 //         await redisClient.del(redisFailCountKey);
 //       }
 //     }
 
-//     console.log("FetchLeadsPage END");
+//     console.log("FetchAllInterestedLeadsPage END");
 //     return response.data;
 //   } catch (error) {
 //     if (setErrorOccurred) setErrorOccurred(true);
 //     if (setErrorContext) setErrorContext(error.message);
-//     console.error("Error in fetchLeadsPage:", error.message);
+//     console.error("Error in fetchAllInterestedLeadsPage:", error.message);
 //     throw error;
 //   }
 // }
-
-async function fetchLeadsPage({
-  cursor = null,
-  pageLimit,
-  authHeaders,
-  setErrorContext,
-  setErrorOccurred,
-}) {
-  console.log("FetchAllInterestedLeadsPage -init");
-
-  const redisCursorKey = `insta:global_cursor:${pageLimit}`;
-  const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
-
-  try {
-    // Step 1: Get stored cursor (if any)
-    let storedCursor = await redisClient.get(redisCursorKey);
-    const effectiveCursor = storedCursor || cursor || "";
-
-    console.log(`Using global cursor (limit=${pageLimit}):`, effectiveCursor);
-
-    // Step 2: Build request
-    const body = {
-      filter: "FILTER_LEAD_INTERESTED",
-      limit: pageLimit,
-      starting_after: effectiveCursor,
-    };
-
-    // Step 3: Send API request
-    const response = await axios.post(
-      `https://api.instantly.ai/api/v2/leads/list`,
-      body,
-      {
-        headers: authHeaders,
-      }
-    );
-
-    const leads = response.data?.items || [];
-
-    console.log(colorize("Fetched Leads ...", "cyan"));
-    leads.forEach((lead, index) => {
-      console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
-    });
-
-    // Step 4: Handle cursor logic
-    if (response.data?.next_starting_after) {
-      const newCursor = response.data.next_starting_after;
-
-      await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
-      await redisClient.del(redisFailCountKey);
-
-      console.log(`Updated global Redis cursor: ${newCursor}`);
-    } else {
-      console.log("No new cursor returned by API — keeping current cursor.");
-
-      const failCount =
-        (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
-      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
-
-      console.log(`No-cursor streak: ${failCount} time(s)`);
-
-      if (failCount >= 3) {
-        console.warn("No new cursor after 3 attempts — resetting cursor.");
-        await redisClient.del(redisCursorKey);
-        await redisClient.del(redisFailCountKey);
-      }
-    }
-
-    console.log("FetchAllInterestedLeadsPage END");
-    return response.data;
-  } catch (error) {
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
-    console.error("Error in fetchAllInterestedLeadsPage:", error.message);
-    throw error;
-  }
-}
 
 function getNextCursor(apiResponse) {
   if (!Array.isArray(apiResponse) || apiResponse.length === 0) {

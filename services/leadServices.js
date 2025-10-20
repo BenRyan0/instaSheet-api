@@ -12,6 +12,8 @@ const { getAuthHeaders } = require("../utils/auth");
 
 const { patterns } = require("../Filters/addressRegexConfig.json");
 const { responseReturn } = require("../utils/response.js");
+
+const FormData = require("form-data");
 // Compile regexes once
 const regexes = Object.fromEntries(
   Object.entries(patterns).map(([key, { pattern, flags }]) => [
@@ -20,14 +22,14 @@ const regexes = Object.fromEntries(
   ])
 );
 
-const FormData = require('form-data'); // only in Node
+// const FormData = require('form-data'); // only in Node
 
 const FILTER_LEAD_INTERESTED_BASE = {
   lt_interest_status: 1,
   email_reply_count: { gt: 0 },
 };
 
-async function fetchLeadsPage({
+async function fetchLeadsPageWebhook({
   pageLimit = 2,
   authHeaders,
   setErrorOccurred,
@@ -94,81 +96,81 @@ async function fetchLeadsPage({
 }
 
 
-// async function fetchLeadsPage({
-//   cursor = null,
-//   pageLimit,
-//   authHeaders,
-//   setErrorContext,
-//   setErrorOccurred,
-// }) {
-//   console.log("FetchAllInterestedLeadsPage -init");
+async function fetchLeadsPage({
+  cursor = null,
+  pageLimit,
+  authHeaders,
+  setErrorContext,
+  setErrorOccurred,
+}) {
+  console.log("FetchAllInterestedLeadsPage -init");
 
-//   const redisCursorKey = `insta:global_cursor:${pageLimit}`;
-//   const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
+  const redisCursorKey = `insta:global_cursor:${pageLimit}`;
+  const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
 
-//   try {
-//     // Step 1: Get stored cursor (if any)
-//     let storedCursor = await redisClient.get(redisCursorKey);
-//     const effectiveCursor = storedCursor || cursor || "";
+  try {
+    // Step 1: Get stored cursor (if any)
+    let storedCursor = await redisClient.get(redisCursorKey);
+    const effectiveCursor = storedCursor || cursor || "";
 
-//     console.log(`Using global cursor (limit=${pageLimit}):`, effectiveCursor);
+    console.log(`Using global cursor (limit=${pageLimit}):`, effectiveCursor);
 
-//     // Step 2: Build request
-//     const body = {
-//       filter: "FILTER_LEAD_INTERESTED",
-//       limit: pageLimit,
-//       starting_after: effectiveCursor,
-//     };
+    // Step 2: Build request
+    const body = {
+      filter: "FILTER_LEAD_INTERESTED",
+      limit: pageLimit,
+      starting_after: effectiveCursor,
+    };
 
-//     // Step 3: Send API request
-//     const response = await axios.post(
-//       `https://api.instantly.ai/api/v2/leads/list`,
-//       body,
-//       {
-//         headers: authHeaders,
-//       }
-//     );
+    // Step 3: Send API request
+    const response = await axios.post(
+      `https://api.instantly.ai/api/v2/leads/list`,
+      body,
+      {
+        headers: authHeaders,
+      }
+    );
 
-//     const leads = response.data?.items || [];
+    const leads = response.data?.items || [];
 
-//     console.log(colorize("Fetched Leads ...", "cyan"));
-//     leads.forEach((lead, index) => {
-//       console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
-//     });
+    console.log(colorize("Fetched Leads ...", "cyan"));
+    leads.forEach((lead, index) => {
+      console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
+    });
 
-//     // Step 4: Handle cursor logic
-//     if (response.data?.next_starting_after) {
-//       const newCursor = response.data.next_starting_after;
+    // Step 4: Handle cursor logic
+    if (response.data?.next_starting_after) {
+      const newCursor = response.data.next_starting_after;
 
-//       await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
-//       await redisClient.del(redisFailCountKey);
+      await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
+      await redisClient.del(redisFailCountKey);
 
-//       console.log(`Updated global Redis cursor: ${newCursor}`);
-//     } else {
-//       console.log("No new cursor returned by API — keeping current cursor.");
+      console.log(`Updated global Redis cursor: ${newCursor}`);
+    } else {
+      console.log("No new cursor returned by API — keeping current cursor.");
 
-//       const failCount =
-//         (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
-//       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
+      const failCount =
+        (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
+      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
 
-//       console.log(`No-cursor streak: ${failCount} time(s)`);
+      console.log(`No-cursor streak: ${failCount} time(s)`);
 
-//       if (failCount >= 3) {
-//         console.warn("No new cursor after 3 attempts — resetting cursor.");
-//         await redisClient.del(redisCursorKey);
-//         await redisClient.del(redisFailCountKey);
-//       }
-//     }
+      if (failCount >= 3) {
+        console.warn("No new cursor after 3 attempts — resetting cursor.");
+        await redisClient.del(redisCursorKey);
+        await redisClient.del(redisFailCountKey);
+      }
+    }
 
-//     console.log("FetchAllInterestedLeadsPage END");
-//     return response.data;
-//   } catch (error) {
-//     if (setErrorOccurred) setErrorOccurred(true);
-//     if (setErrorContext) setErrorContext(error.message);
-//     console.error("Error in fetchAllInterestedLeadsPage:", error.message);
-//     throw error;
-//   }
-// }
+    console.log("FetchAllInterestedLeadsPage END");
+    return response.data;
+  } catch (error) {
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext) setErrorContext(error.message);
+    console.error("Error in fetchAllInterestedLeadsPage:", error.message);
+    throw error;
+  }
+}
 
 function getNextCursor(apiResponse) {
   if (!Array.isArray(apiResponse) || apiResponse.length === 0) {
@@ -1038,7 +1040,7 @@ async function encodeToSheet(
       });
     }),
     (async () => {
-      await new Promise((r) => setTimeout(r, 40000));
+      await new Promise((r) => setTimeout(r, 10000));
       rl.close();
       console.log(
         "\n No response after 30 seconds — running fallback before proceeding..."
@@ -1208,13 +1210,16 @@ async function appendToLeadDatabase({
 async function postAfterEncoding(args) {
   const { rowJson, sheetUrl, additionalContext } = args;
 
-    // Build tags array dynamically
+  console.log("postAfterEncoding - ARGS");
+  console.log(args);
+
+  // Build tags array dynamically
   const tags = [];
   if (additionalContext?.Category) {
     tags.push(additionalContext.Category);
   }
 
- const reqBody = {
+  const reqBody = {
     source: "GOVA",
     status: "NEW",
     name: `test ${rowJson["lead first name"] || ""} ${
@@ -1239,7 +1244,18 @@ async function postAfterEncoding(args) {
     is_public: sheetUrl || "",
   };
 
-  // 2. Build FormData
+  // ✅ Log all data that will be added to FormData
+  console.log("---- FORM DATA CONTENTS ----");
+  for (const [key, value] of Object.entries(reqBody)) {
+    if (Array.isArray(value)) {
+      value.forEach(v => console.log(`${key}[]: ${v}`));
+    } else {
+      console.log(`${key}: ${value}`);
+    }
+  }
+  console.log("-----------------------------");
+
+  // Build FormData
   const form = new FormData();
   for (const [key, value] of Object.entries(reqBody)) {
     if (Array.isArray(value)) {
@@ -1249,29 +1265,20 @@ async function postAfterEncoding(args) {
     }
   }
 
-  // 3. Auth headers
-  const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
+  // Merge FormData headers with AuthToken header
+  const headers = {
+    AuthToken: process.env.PERFEX_CRM_API_KEY,
+    ...(typeof form.getHeaders === "function" ? form.getHeaders() : {}),
+  };
 
-  // 4. Merge FormData headers if available
-  const formHeaders = typeof form.getHeaders === 'function'
-    ? form.getHeaders()
-    : {}; // browser FormData → Axios handles headers
-
-  const headers = { ...authHeaders, ...formHeaders };
-
-  // 5. Send request
+  // Send POST request
   try {
-    const response = await axios.post(
-      'https://govacrm.com/api/leads',
-      form,
-      { headers }
-    );
-    console.log("response")
-    console.log(response)
+    const response = await axios.post("https://govacrm.com/api/leads", form, { headers });
+    console.log("TO CRM POST REQ");
+    console.log(response.data);
     return response.status === 200;
   } catch (err) {
-    console.log(err)
-    // handle errors…
+    console.error("CRM post error:", err.response?.data || err.message);
     return false;
   }
 }
@@ -1689,4 +1696,5 @@ module.exports = {
   getNextCursor,
   encodeLeadFromRequest,
   markToBeApprovedLead,
+  fetchLeadsPageWebhook
 };

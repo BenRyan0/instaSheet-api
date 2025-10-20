@@ -15,7 +15,7 @@ const { emitProgress } = require("../events/progressEmitter");
 const { normalizeLeadsArray } = require("../utils/leads");
 const { mapToSheetRow } = require("../mappers/sheetRow");
 const { getAuthHeaders } = require("../utils/auth");
-const { fetchLeadsPage, getNextCursor } = require("../services/leadServices");
+const { fetchLeadsPage, getNextCursor,fetchLeadsPageWebhook } = require("../services/leadServices");
 const {
   filterNewLeads,
   normalizeKey,
@@ -223,7 +223,7 @@ class instantlyAiController {
     var i = 0;
     this.errorOccurred = false;
     try {
-      const { campaignId, opts, sheetName } = req.body;
+      const { campaignId, opts, sheetName, useWebhook } = req.body;
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails:${campaignId}`;
@@ -248,8 +248,9 @@ class instantlyAiController {
         state.nextPage();
 
         // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
-        const page = await fetchLeadsPage({
-          // campaignId,
+        const leadFetcher = useWebhook ? fetchLeadsPageWebhook : fetchLeadsPage;
+
+        const page = await leadFetcher({
           cursor,
           pageLimit: opts.pageLimit,
           aiThreshold: opts.aiInterestThreshold,

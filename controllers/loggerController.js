@@ -5,8 +5,8 @@ class loggerController {
   // logController.js
 
   addNewLog = async (logData) => {
-      console.log("logData")
-      console.log(logData)
+    console.log("logData");
+    console.log(logData);
     try {
       const insertQuery = `
       INSERT INTO encoding_runs (
@@ -54,21 +54,13 @@ class loggerController {
     try {
       const query = `
       SELECT 
-        id,
-        total_processed,
-        pages_fetched,
-        processed_leads,
-        distinct_leads_checked,
-        interested_lead_count,
-        stopped_early,
-        max_emails_cap,
-        max_pages_cap,
-        ai_interest_threshold,
-        total_encoded,
-         total_tobe_approved,
-        created_at
-      FROM encoding_runs
-      ORDER BY created_at DESC
+        COALESCE(a.approval_date, f.date_fetched) AS date,
+        COALESCE(a.approved_count, 0) AS approved,
+        COALESCE(f.fetched_count, 0) AS fetched
+      FROM approved_encoding_lead a
+      FULL OUTER JOIN fetched_interested_lead f
+        ON a.approval_date = f.date_fetched
+      ORDER BY date;
     `;
 
       const result = await con.query(query);

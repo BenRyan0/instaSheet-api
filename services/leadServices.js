@@ -1082,171 +1082,6 @@ async function postAfterEncoding(args) {
   }
 }
 
-// async function postAfterEncoding({
-//   rowJson,
-//   sheetUrl,
-//   additionalContext,
-//   setErrorOccurred,
-//   setErrorContext,
-// }) {
-//   console.log("Sending POST request with encoded row data...");
-
-//   // Build tags array
-//   const tags = [];
-//   if (additionalContext?.Category) {
-//     tags.push(additionalContext.Category);
-//   }
-
-//   // Build the flat payload object
-//   const reqBody = {
-//     source: "",
-//     status: "",
-//     name: `${rowJson["lead first name"] || ""} ${
-//       rowJson["lead last name"] || ""
-//     }`.trim(),
-//     assigned: "",
-//     clientid: additionalContext.ClientID || "",
-//     tags,
-//     title: "",
-//     email: rowJson["lead email"] || "",
-//     website: rowJson.details || "",
-//     phonenumber: (rowJson["company phone#"] || "").replace(/\D/g, ""),
-//     company: rowJson.company || "",
-//     address: rowJson.address || "",
-//     city: rowJson.city || "",
-//     zip: rowJson.zip || "",
-//     state: rowJson.state || "",
-//     country: "",
-//     default_language: "",
-//     description: (rowJson["email reply"] || "").trim(),
-//     custom_contact_date: "",
-//     is_public: sheetUrl ? 1 : 0,
-//   };
-
-//   // Convert payload to FormData
-//   const form = new FormData();
-//   for (const [key, value] of Object.entries(reqBody)) {
-//     if (Array.isArray(value)) {
-//       // append each tag individually
-//       value.forEach(v => form.append(`${key}[]`, v));
-//     } else {
-//       form.append(key, value);
-//     }
-//   }
-
-//   try {
-//     console.log("Prepared FormData payload:");
-//     console.log(reqBody);
-
-//     // Merge auth headers with multipart boundary headers
-//     const headers = {
-//       ...getAuthHeaders(process.env.PERFEX_CRM_API_KEY),
-//       ...form.getHeaders(),
-//     };
-
-//     const response = await axios.post(
-//       "https://govacrm.com/api/leads",
-//       form,
-//       { headers }
-//     );
-
-//     console.log("POST request to CRM completed:", response.status);
-//     if (response.status !== 200 && setErrorOccurred) {
-//       setErrorOccurred(true);
-//     }
-
-//     return response.status === 200;
-//   } catch (err) {
-//     if (setErrorOccurred) setErrorOccurred(true);
-//     if (setErrorContext) setErrorContext(err.response?.data || err.message);
-//     console.error("Failed to send POST request:", err.response?.data || err.message);
-//     return false;
-//   }
-// }
-// async function postAfterEncoding({
-//   rowJson,
-//   sheetUrl,
-//   additionalContext,
-//   setErrorOccurred,
-//   setErrorContext,
-// }) {
-//   console.log("Sending POST request with encoded row data...");
-
-//   // Build tags array dynamically
-//   const tags = [];
-//   if (additionalContext?.Category) {
-//     tags.push(additionalContext.Category);
-//   }
-
-//  const reqBody = {
-//     source: "GOVA",
-//     status: "NEW",
-//     name: `test ${rowJson["lead first name"] || ""} ${
-//       rowJson["lead last name"] || ""
-//     }`.trim(),
-//     assigned: "unassigned",
-//     client_id: additionalContext.ClientID || "",
-//     tags,
-//     title: "",
-//     email: rowJson["lead email"] || "",
-//     website: rowJson.details || "",
-//     phonenumber: rowJson["company phone#"] || "",
-//     company: rowJson.company || "",
-//     address: rowJson.address || "",
-//     city: rowJson.city || "",
-//     zip: rowJson.zip || "",
-//     state: rowJson.state || "",
-//     country: "",
-//     default_language: "",
-//     description: rowJson["email reply"] || "",
-//     custom_contact_date: "",
-//     is_public: sheetUrl || "",
-//   };
-
-//   const authHeaders = getAuthHeaders(process.env.PERFEX_CRM_API_KEY);
-
-//   let attempts = 0;
-//   const maxRetries = 3;
-//   const baseDelay = 1000; // 1 second
-
-//   while (attempts < maxRetries) {
-//     try {
-//       const response = await axios.post(
-//         "https://govacrm.com/api/leads",
-//         reqBody,
-//         { headers: authHeaders }
-//       );
-
-//       console.log("POST request to CRM completed:", response.status);
-
-//       if (response.status === 200) {
-//         return true; // Success, stop retrying
-//       } else {
-//         throw new Error(`Unexpected status code: ${response.status}`);
-//       }
-
-//     } catch (err) {
-//       attempts++;
-//       console.error(
-//         `Attempt ${attempts} failed: ${err.message}${
-//           attempts < maxRetries ? " — retrying..." : ""
-//         }`
-//       );
-
-//       if (attempts >= maxRetries) {
-//         if (setErrorOccurred) setErrorOccurred(true);
-//         if (setErrorContext) setErrorContext(err.message);
-//         console.error("All retry attempts failed.");
-//         return false;
-//       }
-
-//       // Wait before retrying (exponential backoff)
-//       const delay = baseDelay * Math.pow(2, attempts - 1);
-//       await new Promise((resolve) => setTimeout(resolve, delay));
-//     }
-//   }
-// }
-
 async function encodeLeadFromRequest({
   spreadsheetId,
   sheetName,
@@ -1453,6 +1288,29 @@ async function incrementApprovedEncodingLead({ createdAt }) {
   }
 }
 
+async function incrementFetchedInterestedLead() {
+  try {
+    // Use the current date (YYYY-MM-DD)
+    const date_fetched = new Date().toISOString().split("T")[0];
+
+    // Upsert logic: insert if not exists, else increment count
+    await con.query(
+      `
+      INSERT INTO fetched_interested_lead (date_fetched, fetched_count)
+      VALUES ($1, 1)
+      ON CONFLICT (date_fetched)
+      DO UPDATE SET fetched_count = fetched_interested_lead.fetched_count + 1
+      `,
+      [date_fetched]
+    );
+
+    console.log(`Fetched interested lead count updated for ${date_fetched}`);
+  } catch (err) {
+    console.error("Error updating fetched_interested_lead:", err.message);
+  }
+}
+
+
 markToBeApprovedLead = async (req, res) => {
   const { id } = req.body;
   try {
@@ -1494,4 +1352,5 @@ module.exports = {
   encodeLeadFromRequest,
   markToBeApprovedLead,
   fetchLeadsPageWebhook,
+  incrementFetchedInterestedLead
 };

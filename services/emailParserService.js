@@ -91,9 +91,6 @@ async function extractReply({
   }
 }
 
-/**
- * Normalizes output structure
- */
 function normalizeSchema(obj = {}) {
   return {
     reply: obj.reply || "",

@@ -15,7 +15,11 @@ const { emitProgress } = require("../events/progressEmitter");
 const { normalizeLeadsArray } = require("../utils/leads");
 const { mapToSheetRow } = require("../mappers/sheetRow");
 const { getAuthHeaders } = require("../utils/auth");
-const { fetchLeadsPage, getNextCursor,fetchLeadsPageWebhook } = require("../services/leadServices");
+const {
+  fetchLeadsPage,
+  getNextCursor,
+  fetchLeadsPageWebhook,
+} = require("../services/leadServices");
 const {
   filterNewLeads,
   normalizeKey,
@@ -221,12 +225,12 @@ class instantlyAiController {
 
   getInterestedRepliesOnly_ = async (req, res) => {
     var i = 0;
-    this.errorOccurred = false;
+
     try {
-      const { campaignId, opts, sheetName, useWebhook } = req.body;
+      const { opts, sheetName, useWebhook } = req.body;
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
-      const dedupKey = `insta:processed_emails:${campaignId}`;
+      const dedupKey = `insta:processed_emails`;
       const seenMembers = await redisClient.sMembers(dedupKey);
       const seen = new Set(seenMembers);
 
@@ -509,6 +513,438 @@ class instantlyAiController {
       return handleError(err, res);
     }
   };
+
+  async encodeInterestedRepliesByWebhook({ opts, sheetName, useWebhook }) {
+    this.errorOccurred = false;
+    this.errorContext = null;
+
+    try {
+      const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
+      const dedupKey = `insta:processed_emails`;
+
+      const seenMembers = await redisClient.sMembers(dedupKey);
+      const seen = new Set(seenMembers);
+
+      const state = initState({
+        initialSeenCount: seen.size,
+        maxEmails: opts.maxEmails,
+        maxPages: opts.maxPages,
+        aiInterestThreshold: opts.aiInterestThreshold,
+      });
+
+      let cursor = null;
+
+      while (shouldContinue(state) && !this.errorOccurred) {
+        state.nextPage();
+
+        const leadFetcher = useWebhook ? fetchLeadsPageWebhook : fetchLeadsPage;
+        const page = await leadFetcher({
+          cursor,
+          pageLimit: opts.pageLimit,
+          aiThreshold: opts.aiInterestThreshold,
+          authHeaders,
+          setErrorOccurred: this.setErrorOccurred.bind(this),
+          setErrorContext: this.setErrorContext.bind(this),
+        });
+
+        const leads = normalizeLeadsArray(page);
+        cursor = getNextCursor(page);
+
+        const batch = filterNewLeads(leads, seen);
+        console.log("Batch:", batch.length);
+
+        if (batch.length === 0) continue;
+
+        for (const lead of batch) {
+          const result = await fetchRepliesForLead(lead, {
+            perLeadLimit: opts.emailsPerLead,
+            authHeaders,
+            delayMs: opts.delayMs,
+            setErrorOccurred: this.setErrorOccurred.bind(this),
+            setErrorContext: this.setErrorContext.bind(this),
+            is_unread: opts.is_unread,
+          });
+
+          if (result.error || result.skipped) {
+            const key = normalizeKey(lead.email || lead.id);
+            if (key) await markProcessed(key, redisClient, dedupKey, seen);
+            continue;
+          }
+
+          const interestedEmails = result.emails.filter((e) =>
+            isInterestedReply(e, opts.aiInterestThreshold)
+          );
+
+          if (!interestedEmails.length) continue;
+
+          for (const email of interestedEmails) {
+            const emailKey = normalizeKey(lead.email || lead.id);
+            const key = emailKey || lead.id;
+
+            const emailTimestamp = new Date(
+              email?.timestamp_email || Date.now()
+            );
+            const age = Date.now() - emailTimestamp.getTime();
+            if (age > 14 * 24 * 60 * 60 * 1000) continue;
+
+            const emailBodyText = email.body?.text || "";
+            const wordCount = emailBodyText.split(/\s+/).filter(Boolean).length;
+            if (wordCount > 500) continue;
+
+            let row;
+            try {
+              row = await mapToSheetRow({
+                lead,
+                email,
+                setErrorOccurred: this.setErrorOccurred.bind(this),
+                setErrorContext: this.setErrorContext.bind(this),
+              });
+            } catch (e) {
+              console.warn("mapToSheetRow failed:", e.message);
+              if (key) await markProcessed(key, redisClient, dedupKey, seen);
+              continue;
+            }
+
+            let processed = false;
+            let attempts = 0;
+            while (!processed && attempts < 3) {
+              attempts++;
+              try {
+                processed = await this.processEmailRow({
+                  emailRow: row,
+                  sheetName,
+                  additionalContext: {
+                    ClientID: lead.id || "N/A",
+                    Category: lead.category || "Uncategorized",
+                    TimeStamp:
+                      email.timestamp_email || new Date().toISOString(),
+                  },
+                  addToTotalEncoded: this.addToTotalEncoded.bind(this),
+                  setErrorOccurred: this.setErrorOccurred.bind(this),
+                  setErrorContext: this.setErrorContext.bind(this),
+                  addTotalToBeApproved: this.addTotalToBeApproved.bind(this),
+                });
+              } catch (err) {
+                console.warn(
+                  `processEmailRow failed (try ${attempts})`,
+                  err.message
+                );
+                await new Promise((r) => setTimeout(r, 500 * attempts));
+              }
+            }
+
+            if (processed) {
+              state.collect(row, true);
+              if (key) await markProcessed(key, redisClient, dedupKey, seen);
+            }
+          }
+        }
+
+        if (this.errorOccurred) {
+          console.log("Error occurred mid-loop");
+          break;
+        }
+      }
+
+      const summary = summarizeState(state);
+      await loggerController.addNewLog(summary);
+      console.log("Encode finished:", summary);
+      return summary;
+    } catch (err) {
+      console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);
+      return { error: true, message: err.message };
+    }
+  }
+  // async function encodeInterestedReplies_byWebook (req, res) {
+  //   var i = 0;
+  //   this.errorOccurred = false;
+  //   try {
+  //     const { campaignId, opts, sheetName, useWebhook } = req.body;
+  //     const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
+
+  //     const dedupKey = `insta:processed_emails:${campaignId}`;
+  //     const seenMembers = await redisClient.sMembers(dedupKey);
+  //     const seen = new Set(seenMembers);
+
+  //     // State initialization - for progress tracking and logging
+  //     const state = initState({
+  //       initialSeenCount: seen.size,
+  //       maxEmails: opts.maxEmails,
+  //       maxPages: opts.maxPages,
+  //       aiInterestThreshold: opts.aiInterestThreshold,
+  //     });
+
+  //     // Progress imited (socket.io)
+  //     emitProgress(state);
+  //     let cursor = null;
+
+  //     // checking if the loop has reached its max limits
+  //     // Checking if error flag was set before starting main loop
+  //     while (shouldContinue(state) && !this.errorOccurred) {
+  //       state.nextPage();
+
+  //       // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
+  //       const leadFetcher = useWebhook ? fetchLeadsPageWebhook : fetchLeadsPage;
+
+  //       const page = await leadFetcher({
+  //         cursor,
+  //         pageLimit: opts.pageLimit,
+  //         aiThreshold: opts.aiInterestThreshold,
+  //         authHeaders,
+  //         setErrorOccurred: this.setErrorOccurred.bind(this),
+  //         setErrorContext: this.setErrorContext.bind(this),
+  //       });
+
+  //       const leads = normalizeLeadsArray(page);
+  //       cursor = getNextCursor(page);
+
+  //       const batch = filterNewLeads(leads, seen);
+  //       console.log(batch);
+  //       console.log("batch");
+
+  //       if (batch.length === 0) {
+  //         // console.log("[SKIP] Empty batch, not incrementing page count.");
+  //         continue;
+  //       }
+
+  //       // Only increment page when we actually have new leads
+  //       // state.nextPage();
+
+  //       // Sequentially process each lead: wait for replies and email processing before next lead
+  //       for (const lead of batch) {
+  //         const result = await fetchRepliesForLead(lead, {
+  //           // campaignId,
+  //           perLeadLimit: opts.emailsPerLead,
+  //           authHeaders,
+  //           delayMs: opts.delayMs,
+  //           setErrorOccurred: this.setErrorOccurred.bind(this),
+  //           setErrorContext: this.setErrorContext.bind(this),
+  //           is_unread: opts.is_unread,
+  //         });
+
+  //         // Recognize skip or error before proceeding
+  //         if (result.skipped) {
+  //           console.log(
+  //             `[SKIP] Lead skipped (${result.reason}): ${lead.email}`
+  //           );
+  //           // Optionally mark as processed so it's not rechecked next run
+  //           const emailKey = normalizeKey(lead.email || lead.lead);
+  //           const key = emailKey || lead.id;
+  //           if (key) {
+  //             await markProcessed(key, redisClient, dedupKey, seen);
+  //           }
+  //           continue;
+  //         }
+
+  //         if (result.error) {
+  //           console.warn(
+  //             `[ERROR] Skipping lead due to fetch error: ${lead.email}`,
+  //             result.error
+  //           );
+  //           continue;
+  //         }
+
+  //         const { emails } = result;
+
+  //         if (this.errorOccurred) break;
+  //         state.nextLead();
+  //         emitProgress(state);
+
+  //         // Dedup AFTER successful processing instead of before
+  //         const emailKey = normalizeKey(lead.email || lead.lead);
+  //         const key = emailKey || lead.id;
+
+  //         let interested = [];
+  //         try {
+  //           interested = emails.filter((e) =>
+  //             isInterestedReply(e, opts.aiInterestThreshold)
+  //           );
+  //         } catch (e) {
+  //           console.warn("Failed filtering interested emails for lead", {
+  //             leadEmail: lead && (lead.email || lead.lead),
+  //             error: e && e.message,
+  //           });
+  //           interested = [];
+  //         }
+
+  //         if (!interested.length) continue;
+
+  //         // —————— process each email, *waiting* for true ——————
+  //         for (const email of interested) {
+  //           if (this.errorOccurred) break;
+  //           if (state.totalEmailsCollected >= opts.maxEmails) {
+  //             state.stop();
+  //             break;
+  //           }
+  //           // Skip emails older than 2 weeks
+  //           const emailTimestamp = email?.timestamp_email
+  //             ? new Date(email.timestamp_email)
+  //             : null;
+  //           const now = new Date();
+  //           const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+
+  //           if (emailTimestamp && now - emailTimestamp > TWO_WEEKS_MS) {
+  //             console.log(
+  //               `[skip] Email from ${emailTimestamp.toISOString()} is older than 2 weeks, skipping.`
+  //             );
+  //             if (key) {
+  //               await markProcessed(key, redisClient, dedupKey, seen);
+  //             }
+  //             continue;
+  //           }
+  //           // Per-email message-id dedup removed; rely solely on lead email/id key
+
+  //           // Skip very long emails (>500 words) and mark as processed to avoid future repeats
+  //           const emailBodyText =
+  //             (email && email.body && email.body.text) ||
+  //             (lead && lead.payload && lead.payload.text) ||
+  //             "";
+  //           const wordCount =
+  //             typeof emailBodyText === "string"
+  //               ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
+  //               : 0;
+  //           if (wordCount > 500) {
+  //             console.log(
+  //               `[skip] email body too long (${wordCount} words), marking processed.`
+  //             );
+  //             if (key) {
+  //               await markProcessed(key, redisClient, dedupKey, seen);
+  //             }
+  //             continue;
+  //           }
+
+  //           let row;
+  //           let additionalContext = {};
+  //           try {
+  //             // Add contextual info
+  //             // the ClientId and Category to be placed in the tags
+  //             additionalContext = {
+  //               ClientID: lead?.id ?? "N/A",
+  //               TimeStamp: email?.timestamp_email ?? new Date().toISOString(),
+  //               // timestamp_email
+  //               Category:
+  //                 lead?.payload?.category ?? lead?.category ?? "Uncategorized",
+  //             };
+
+  //             if (
+  //               !email.content_preview ||
+  //               email.content_preview.trim() === ""
+  //             ) {
+  //               console.log(
+  //                 `[skip] Missing content_preview for ${
+  //                   lead.email || lead.lead
+  //                 }`
+  //               );
+  //               // Mark as processed so it won't be retried next time
+  //               if (key) {
+  //                 await markProcessed(key, redisClient, dedupKey, seen);
+  //               }
+  //               continue;
+  //             }
+
+  //             row = await mapToSheetRow({
+  //               lead,
+  //               email,
+  //               setErrorOccurred: this.setErrorOccurred.bind(this),
+  //               setErrorContext: this.setErrorContext.bind(this),
+  //             });
+  //             console.log("MAP TO SHEET ROW RESULT");
+  //             console.log(row);
+  //           } catch (e) {
+  //             console.warn("mapToSheetRow failed", {
+  //               leadEmail: lead && (lead.email || lead.lead),
+  //               error: e && e.message,
+  //             });
+  //             // Mark as processed so we do not retry this lead/email again
+  //             try {
+  //               if (key) {
+  //                 await markProcessed(key, redisClient, dedupKey, seen);
+  //               }
+  //             } catch (markErr) {
+  //               console.warn(
+  //                 "Failed to mark as processed after mapToSheetRow error",
+  //                 markErr && markErr.message
+  //               );
+  //             }
+  //             continue;
+  //           }
+  //           // const row = await mapToSheetRow(lead, email);
+
+  //           // wait until processEmailRow returns true
+  //           let processed = false;
+  //           let attempts = 0;
+  //           const MAX_RETRIES = 3;
+
+  //           do {
+  //             try {
+  //               processed = await this.processEmailRow({
+  //                 emailRow: row,
+  //                 sheetName,
+  //                 additionalContext,
+  //                 addToTotalEncoded: this.addToTotalEncoded.bind(this),
+  //                 setErrorOccurred: this.setErrorOccurred.bind(this),
+  //                 setErrorContext: this.setErrorContext.bind(this),
+  //                 addTotalToBeApproved: this.addTotalToBeApproved.bind(this),
+  //               });
+  //             } catch (e) {
+  //               console.warn("processEmailRow threw", {
+  //                 leadEmail: lead && (lead.email || lead.lead),
+  //                 error: e && e.message,
+  //               });
+  //               processed = false;
+  //             }
+  //             attempts++;
+  //             if (!processed && attempts < MAX_RETRIES) {
+  //               // optional backoff before retry
+  //               await new Promise((r) => setTimeout(r, 500 * attempts));
+  //             }
+  //           } while (!processed && attempts < MAX_RETRIES);
+
+  //           if (processed) {
+  //             state.collect(row, true);
+  //             state.totalInterestedLLM = this.totalEnterestedLLM;
+  //             state.totalEncoded = this.totalEncoded;
+  //             state.totalToBeApproved = this.totalToBeApproved;
+  //             emitProgress(state);
+  //             // Mark as processed only after success
+  //             if (key) {
+  //               await markProcessed(key, redisClient, dedupKey, seen);
+  //             }
+  //           } else {
+  //             console.warn(
+  //               `Failed to process row after ${attempts} attempts:`,
+  //               row
+  //             );
+  //           }
+  //         }
+
+  //         if (state.stoppedEarly) break;
+  //       }
+
+  //       // Early exit if error flag triggered mid-loop
+  //       if (this.errorOccurred) {
+  //         console.log("ERR");
+  //         state.stop();
+  //         state.errorContext = this.errorContext;
+  //         state.stoppedEarly = true;
+  //         emitProgress(state);
+
+  //         const summary = summarizeState(state);
+  //         await loggerController.addNewLog(summary);
+  //         return responseReturn(res, 500, summary);
+  //       }
+  //     }
+
+  //     // Normal finish
+  //     emitProgress(state);
+  //     const summary = summarizeState(state);
+  //     await loggerController.addNewLog(summary);
+
+  //     return responseReturn(res, 200, summary);
+  //   } catch (err) {
+  //     return handleError(err, res);
+  //   }
+  // };
 }
 
 module.exports = new instantlyAiController();

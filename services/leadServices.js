@@ -36,30 +36,33 @@ async function fetchLeadsPageWebhook({
   setErrorContext,
 }) {
   try {
-    // 1️⃣ Get unprocessed emails
-    const { rows: emails } = await con.query(`
+    // 1️ Get unprocessed emails
+    const { rows: emails } = await con.query(
+      `
       SELECT id, campaign_id, email
       FROM tobe_processed_campaign_emails
       WHERE is_processed = FALSE
       ORDER BY created_at DESC
       LIMIT $1;
-    `, [pageLimit]);
+    `,
+      [pageLimit]
+    );
 
     if (emails.length === 0) {
-      console.log('⚠️ No unprocessed emails found.');
+      console.log("No unprocessed emails found.");
       return {
         items: [],
         next_starting_after: null,
-        message: 'No unprocessed emails found.',
+        message: "No unprocessed emails found.",
       };
     }
 
-    const contactList = emails.map(e => e.email);
-    console.log(`📤 Sending POST to Instantly API with contacts:`, contactList);
+    const contactList = emails.map((e) => e.email);
+    console.log(`Sending POST to Instantly API with contacts:`, contactList);
 
-    // 2️⃣ POST request via axios
+    // 2️ POST request via axios
     const response = await axios.post(
-      'https://api.instantly.ai/api/v2/leads/list',
+      "https://api.instantly.ai/api/v2/leads/list",
       {
         contacts: contactList,
         limit: pageLimit,
@@ -67,34 +70,35 @@ async function fetchLeadsPageWebhook({
       {
         headers: {
           ...authHeaders,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       }
     );
 
-    // 3️⃣ Mark emails as processed
-    const processedIds = emails.map(e => e.id);
-    await con.query(`
+    // 3️ Mark emails as processed
+    const processedIds = emails.map((e) => e.id);
+    await con.query(
+      `
       UPDATE tobe_processed_campaign_emails
       SET is_processed = TRUE, updated_at = NOW()
       WHERE id = ANY($1::int[]);
-    `, [processedIds]);
+    `,
+      [processedIds]
+    );
 
-    console.log(`✅ Marked ${processedIds.length} emails as processed.`);
+    console.log(`Marked ${processedIds.length} emails as processed.`);
 
-    // ✅ 4️⃣ Return Instantly API data (so your caller gets it)
+    // 4️ Return Instantly API data (so your caller gets it)
     return response.data;
-
   } catch (err) {
-    console.error('❌ Error fetching leads batch:', err.message);
+    console.error("Error fetching leads batch:", err.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext('fetchLeadsPage');
+    if (setErrorContext) setErrorContext("fetchLeadsPage");
     throw err;
   } finally {
-    console.log('🏁 fetchLeadsPage finished (connection remains open).');
+    console.log("fetchLeadsPage finished (connection remains open).");
   }
 }
-
 
 async function fetchLeadsPage({
   cursor = null,
@@ -539,32 +543,71 @@ async function isActuallyInterested(
         messages: [
           {
             role: "system",
-            content: [
-              "You are an assistant that classifies whether a prospect's email reply shows genuine business interest in the offered service.",
-              "",
-              "SERVICES OFFERED:",
-              "- We provide funding or cash advances based on business gross receipts.",
-              "- Credit history does not affect eligibility.",
-              "- Funding can be released within 24 hours or sooner.",
-              "",
-              "Classify the reply as TRUE or FALSE according to the following:",
-              "",
-              "Mark as TRUE if the reply:",
-              "- Expresses curiosity, intent, or engagement about *receiving funding based on business performance*.",
-              "- Asks for details, requirements, terms, next steps, or timing of funding.",
-              "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
-              "- Indicates willingness to discuss your specific funding service.",
-              "- Asking for more details or a meeting to discuss the offer.",
-              "",
-              "Mark as FALSE if the reply:",
-              "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
-              "- Expresses interest in something different (e.g., grants, loans, donations).",
-              "- Is neutral or automated (e.g., 'Thanks', 'Received').",
-              "- Excludes your offer (e.g., 'only interested in grants').",
-              "",
-              "Respond with exactly one word — 'true' or 'false' — in lowercase.",
-            ].join("\n"),
+            content: `
+                You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
+                ### OFFER CONTEXT
+                We provide working capital or cash advances to businesses based on their gross receipts.
+                - Credit score does not affect eligibility.
+                - Funding can be released within 24 hours.
+
+                ### YOUR TASK
+                Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
+
+                ### CLASSIFY AS TRUE IF:
+                - The reply shows curiosity, openness, or willingness to continue the conversation.
+                - The sender asks for a summary, information, or clarification — even briefly.
+                - The reply includes positive or permissive phrases such as:
+                  "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
+                  "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
+                  "We need funding", "What are the terms?"
+                - The tone is polite and allows engagement, even without a direct “yes.”
+                - The sender expresses business-related funding interest (explicitly or implicitly).
+                - The sender refers you to another person who handles funding, finance, or business decisions (e.g., "Let me give you her number", "You should talk to our owner", "I'll forward this to the manager"). This still counts as interest, since it shows engagement and willingness to connect.
+
+
+                ### CLASSIFY AS FALSE IF:
+                - The reply rejects or declines the offer: "Not interested", "No thanks",
+                  "We already got funding", "We’ll pass", "Stop emailing me".
+                - The reply requests something unrelated (grants, donations, employment, etc.).
+                - The reply is neutral, automated, or non-human (e.g., “Received”, “Out of office”,
+                  “Do not contact”, “Unsubscribe”).
+                - The reply expresses negative sentiment toward the offer.
+
+                ### IMPORTANT
+                - Ignore polite sign-offs or pleasantries.
+                - Focus on the *intent* related to the funding offer.
+                - Respond with exactly one lowercase word: **true** or **false**.
+                `,
           },
+          // {
+          //   role: "system",
+          //   content: [
+          //     "You are an assistant that classifies whether a prospect's email reply shows genuine business interest in the offered service.",
+          //     "",
+          //     "SERVICES OFFERED:",
+          //     "- We provide funding or cash advances based on business gross receipts.",
+          //     "- Credit history does not affect eligibility.",
+          //     "- Funding can be released within 24 hours or sooner.",
+          //     "",
+          //     "Classify the reply as TRUE or FALSE according to the following:",
+          //     "",
+          //     "Mark as TRUE if the reply:",
+          //     "- Expresses curiosity, intent, or engagement about *receiving funding based on business performance*.",
+          //     "- Asks for details, requirements, terms, next steps, or timing of funding.",
+          //     "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
+          //     "- Indicates willingness to discuss your specific funding service.",
+          //     "- Asking for more details or a meeting to discuss the offer.",
+          //     "- Shows a clear indication that is intereseted like 'We are interested','What types of funding do you offer?'",
+          //     "",
+          //     "Mark as FALSE if the reply:",
+          //     "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
+          //     "- Expresses interest in something different (e.g., grants, loans, donations).",
+          //     "- Is neutral or automated (e.g., 'Thanks', 'Received').",
+          //     "- Excludes your offer (e.g., 'only interested in grants').",
+          //     "",
+          //     "Respond with exactly one word — 'true' or 'false' — in lowercase.",
+          //   ].join("\n"),
+          // },
           { role: "user", content: text },
         ],
         temperature: 0,
@@ -674,252 +717,6 @@ async function isActuallyInterested(
   // Fallback to rule-based check if all else fails
   return ruleBasedCheck(text);
 }
-
-// async function isActuallyInterested(
-//   emailReply,
-//   addTotalInterestedLLM,
-//   useLocal = false
-// ) {
-//   // 1. Guard & normalize
-//   if (!emailReply || typeof emailReply !== "string") {
-//     return false;
-//   }
-
-//   const text = normalize(emailReply);
-
-//   // 2. Try the LLM classification
-//   const controller = new AbortController();
-//   let timeoutId;
-
-//   try {
-//     timeoutId = setTimeout(() => controller.abort(), 90000);
-
-//     const url = useLocal
-//       ? "http://localhost:11434/api/chat"
-//       : "https://openrouter.ai/api/v1/chat/completions";
-
-//     const headers = useLocal
-//       ? { "Content-Type": "application/json" }
-//       : {
-//           Authorization: `Bearer ${process.env.OPENROUTER_API_SEC_KEY}`,
-//           "Content-Type": "application/json",
-//         };
-
-//     const model = useLocal
-//       ? process.env.LOCAL_LLM
-//       : process.env.OPEN_ROUTER_MODEL2;
-
-//     console.log(`model OPENROUTER_API_SEC_KEY : ${model}`);
-
-//     const resp = await fetch(url, {
-//       method: "POST",
-//       headers,
-//       signal: controller.signal,
-//       body: JSON.stringify({
-//         model,
-//         messages: [
-//           {
-//             role: "system",
-//             content: [
-//               "You are an assistant that classifies whether a prospect's email reply shows genuine business interest in the offered service.",
-//               "",
-//               "SERVICES OFFERED:",
-//               "- We provide funding or cash advances based on business gross receipts.",
-//               "- Credit history does not affect eligibility.",
-//               "- Funding can be released within 24 hours or sooner.",
-//               "",
-//               "Classify the reply as TRUE or FALSE according to the following:",
-//               "",
-//               "Mark as TRUE if the reply:",
-//               "- Expresses curiosity, intent, or engagement about *receiving funding based on business performance*.",
-//               "- Asks for details, requirements, terms, next steps, or timing of funding.",
-//               "- Shows positive or open-ended responses like 'Yes', 'Sure', 'Tell me more', or 'Let's talk'.",
-//               "- Indicates willingness to discuss your specific funding service.",
-//               "- Asking for more details and questions about the offer (e.g. ,Do you fund business acquisitions?)",
-//               "- Asking for a call or meeting to discuss the offer (e.g. Can we schedule a call to discuss?)",
-//               "",
-//               "Mark as FALSE if the reply:",
-//               "- Rejects or declines the offer (e.g., 'not interested', 'we have to pass', 'no thanks').",
-//               "- Expresses interest in something different from what is offered (e.g., only grants, loans, investments, or donations).",
-//               "- Is neutral, generic, or automated (e.g., 'Thanks', 'Received', 'Got it').",
-//               "- Contains conditions that exclude your type of offer (e.g., 'only interested in grants' or 'not open to funding').",
-//               "",
-//               "Respond with exactly one word — 'true' or 'false' — in lowercase. No punctuation or explanation.",
-//             ].join("\\n"),
-//           },
-//           { role: "user", content: text },
-//         ],
-//         temperature: 0,
-//       }),
-//     });
-
-//     console.log("RESPONSE IN ISACTUALLYINTERESTED");
-//     console.log(resp);
-
-//     if (!resp.ok) {
-//       console.error("LLM ERROR isActuallyInterested:", resp.status);
-//       // if (setErrorOccurred) setErrorOccurred(true);
-//       // throw new Error(`HTTP ${resp.status}`);
-//     }
-
-//     // --- Handle local NDJSON vs OpenRouter JSON ---
-//     let modelOut = "";
-
-//     if (useLocal) {
-//       // NDJSON stream parsing
-//       const raw = await resp.text();
-//       const lines = raw
-//         .split("\n")
-//         .map((l) => l.trim())
-//         .filter((l) => l.length > 0);
-
-//       let lastValid = null;
-//       for (let line of lines) {
-//         try {
-//           const obj = JSON.parse(line);
-//           if (obj?.message?.content) {
-//             lastValid = obj.message.content.trim();
-//             if (lastValid) break; // take the first non-empty response
-//           }
-//         } catch (e) {
-//           console.warn("Skipping bad NDJSON line:", line);
-//         }
-//       }
-
-//       modelOut = (lastValid || "").toLowerCase();
-//       console.log("Parsed NDJSON modelOut:", modelOut);
-//     } else {
-//       // OpenRouter JSON
-//       const json = await resp.json();
-//       console.log("Parsed OpenRouter JSON:", json);
-
-//       modelOut =
-//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
-//         "";
-//       console.log("Parsed OpenRouter modelOut:", modelOut);
-//     }
-
-//     // --- Interpret model output ---
-//     // Handle extra artifacts like "false<|begin_of_sentence|>" by sanitizing
-//     const tokenMatch = (modelOut.match(
-//       /\b(true|false|yes|no|interested|not interested)\b/i
-//     ) || [])[1];
-//     const normalizedOut = (tokenMatch || modelOut)
-//       .toString()
-//       .toLowerCase()
-//       .trim();
-
-//     if (
-//       ["true", "yes", "interested"].includes(normalizedOut) ||
-//       modelOut.includes("true")
-//     ) {
-//       if (typeof addTotalInterestedLLM === "function") {
-//         addTotalInterestedLLM(1);
-//       }
-//       return true;
-//     }
-
-//     if (
-//       ["false", "no", "not interested"].includes(normalizedOut) ||
-//       modelOut.includes("false")
-//     ) {
-//       return false;
-//     }
-
-//     console.warn("LLM gave unexpected output, falling back:", modelOut);
-
-//     // If OpenRouter response is unclear and we are not using local, attempt a local LLM fallback
-//     if (!useLocal) {
-//       try {
-//         const localController = new AbortController();
-//         const localTimeout = setTimeout(() => localController.abort(), 30000);
-
-//         const localResp = await fetch("http://localhost:11434/api/chat", {
-//           method: "POST",
-//           headers: { "Content-Type": "application/json" },
-//           signal: localController.signal,
-//           body: JSON.stringify({
-//             model: process.env.LOCAL_LLM,
-//             messages: [
-//               {
-//                 role: "system",
-//                 content: [
-//                   "Classify whether the following email reply from a prospect shows genuine interest",
-//                   "—asking for pricing, next steps, scheduling, or more info.",
-//                   "Ignore promotional pitches and auto-replies.",
-//                   'Answer strictly "true" or "false".',
-//                 ].join("\n"),
-//               },
-//               { role: "user", content: text },
-//             ],
-//             temperature: 0,
-//             stream: false,
-//           }),
-//         });
-
-//         clearTimeout(localTimeout);
-
-//         if (localResp.ok) {
-//           // Some local servers return JSON, others NDJSON; try JSON first
-//           let localOut = "";
-//           try {
-//             const localJson = await localResp.json();
-//             localOut = (localJson.message?.content || "").toLowerCase().trim();
-//           } catch (_) {
-//             const raw = await localResp.text();
-//             const lines = raw
-//               .split("\n")
-//               .map((l) => l.trim())
-//               .filter((l) => l.length > 0);
-//             let lastValid = null;
-//             for (let line of lines) {
-//               try {
-//                 const obj = JSON.parse(line);
-//                 if (obj?.message?.content) {
-//                   lastValid = obj.message.content.trim();
-//                   if (lastValid) break;
-//                 }
-//               } catch (e) {
-//                 // ignore bad lines
-//               }
-//             }
-//             localOut = (lastValid || "").toLowerCase();
-//           }
-
-//           const localToken = (localOut.match(/\b(true|false)\b/i) || [])[1];
-//           const localNorm = (localToken || localOut)
-//             .toString()
-//             .toLowerCase()
-//             .trim();
-
-//           if (localNorm === "true") {
-//             if (typeof addTotalInterestedLLM === "function")
-//               addTotalInterestedLLM(1);
-//             return true;
-//           }
-//           if (localNorm === "false") {
-//             return false;
-//           }
-//         }
-//       } catch (fallbackErr) {
-//         console.warn(
-//           "Local fallback failed:",
-//           fallbackErr && fallbackErr.message
-//         );
-//       }
-//     }
-//     // if (setErrorOccurred) setErrorOccurred(true);
-//   } catch (err) {
-//     console.error("LLM classification error:", err);
-//     // if (setErrorOccurred) setErrorOccurred(true);
-//   } finally {
-//     clearTimeout(timeoutId);
-//   }
-
-//   // 3. Fallback to local filters if LLM fails
-//   return ruleBasedCheck(text);
-// }
 
 async function encodeToSheet(
   spreadsheetId,
@@ -1248,7 +1045,7 @@ async function postAfterEncoding(args) {
   console.log("---- FORM DATA CONTENTS ----");
   for (const [key, value] of Object.entries(reqBody)) {
     if (Array.isArray(value)) {
-      value.forEach(v => console.log(`${key}[]: ${v}`));
+      value.forEach((v) => console.log(`${key}[]: ${v}`));
     } else {
       console.log(`${key}: ${value}`);
     }
@@ -1259,7 +1056,7 @@ async function postAfterEncoding(args) {
   const form = new FormData();
   for (const [key, value] of Object.entries(reqBody)) {
     if (Array.isArray(value)) {
-      value.forEach(v => form.append(`${key}[]`, v));
+      value.forEach((v) => form.append(`${key}[]`, v));
     } else {
       form.append(key, value);
     }
@@ -1273,7 +1070,9 @@ async function postAfterEncoding(args) {
 
   // Send POST request
   try {
-    const response = await axios.post("https://govacrm.com/api/leads", form, { headers });
+    const response = await axios.post("https://govacrm.com/api/leads", form, {
+      headers,
+    });
     console.log("TO CRM POST REQ");
     console.log(response.data);
     return response.status === 200;
@@ -1282,7 +1081,6 @@ async function postAfterEncoding(args) {
     return false;
   }
 }
-
 
 // async function postAfterEncoding({
 //   rowJson,
@@ -1308,7 +1106,7 @@ async function postAfterEncoding(args) {
 //     }`.trim(),
 //     assigned: "",
 //     clientid: additionalContext.ClientID || "",
-//     tags,  
+//     tags,
 //     title: "",
 //     email: rowJson["lead email"] || "",
 //     website: rowJson.details || "",
@@ -1448,7 +1246,6 @@ async function postAfterEncoding(args) {
 //     }
 //   }
 // }
-
 
 async function encodeLeadFromRequest({
   spreadsheetId,
@@ -1696,5 +1493,5 @@ module.exports = {
   getNextCursor,
   encodeLeadFromRequest,
   markToBeApprovedLead,
-  fetchLeadsPageWebhook
+  fetchLeadsPageWebhook,
 };

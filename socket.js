@@ -1,3 +1,4 @@
+// const instantlyAiController = require("./controllers/instantlyAiController");
 let io;
 let allCustomer = [];
 let allSeller = [];
@@ -10,12 +11,10 @@ const init = (server, options = {}) => {
   io.on("connection", (socket) => {
     console.log(`New socket connected: ${socket.id}`);
     let timeChange;
-    if (timeChange) 
-        clearInterval(timeChange)
-      setInterval(() => {
-        socket.emit("message", new Date());
-      }, 3000);
-
+    if (timeChange) clearInterval(timeChange);
+    setInterval(() => {
+      socket.emit("message", new Date());
+    }, 3000);
 
     // Handle disconnection
     socket.on("disconnect", () => {
@@ -32,8 +31,36 @@ const init = (server, options = {}) => {
         }
       });
     });
-  });
 
+    const instantlyAiController = require("./controllers/instantlyAiController");
+    // --- NEW: Listen for email trigger event ---
+    socket.on("new_email_added", async (payload) => {
+      console.log("Socket event received: new_email_added", payload);
+
+      try {
+        const opts = {
+          is_unread: true,
+          delayMs: 300,
+          pageLimit: 2,
+          emailsPerLead: 1,
+          concurrency: 1,
+          maxEmails: 100,
+          maxPages: 5,
+          aiInterestThreshold: 1,
+        };
+
+        await instantlyAiController.encodeInterestedRepliesByWebhook({
+          opts,
+          sheetName: "MCA Loan",
+          useWebhook: true,
+        });
+
+        console.log("encodeInterestedRepliesbyWebook finished successfully");
+      } catch (err) {
+        console.error("Error in encodeInterestedRepliesbyWebook:", err);
+      }
+    });
+  });
   return io;
 };
 

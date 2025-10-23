@@ -73,7 +73,7 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
 
     return false; // fallback
   } catch (err) {
-    console.error("Error classifying with AI:", err);
+    console.error("Error classifying with AI:");
     if (setErrorOccurred) setErrorOccurred(true); // Mark error on failure
     if (setErrorContext) setErrorContext(err.message);
     return false;
@@ -300,7 +300,7 @@ async function isActuallyInterested(
                 - The sender asks for a summary, information, or clarification — even briefly.
                 - The reply includes positive or permissive phrases such as:
                   "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
-                  "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
+                  "A brief summary is fine", "Tell me more", "Interested", "Let's talk", " give me a call",
                   "We need funding", "What are the terms?"
                 - The tone is polite and allows engagement, even without a direct “yes.”
                 - The sender expresses business-related funding interest (explicitly or implicitly).

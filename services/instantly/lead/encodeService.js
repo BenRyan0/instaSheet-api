@@ -4,7 +4,7 @@ const { initGoogleClients } = require("../../../services/googleClient.js");
 const readline = require("readline");
 const con = require("../../../db/db.js");
 const { responseReturn } = require("../../../utils/response.js");
-const  {postAfterEncoding} = require("../../CRM/perfexCrm") 
+const { postAfterEncoding } = require("../../CRM/perfexCrm");
 const FormData = require("form-data");
 
 async function encodeToSheet(
@@ -15,7 +15,8 @@ async function encodeToSheet(
   addToTotalEncoded,
   setErrorOccurred,
   setErrorContext,
-  addTotalToBeApproved
+  addTotalToBeApproved,
+  autoAppend = true
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -111,48 +112,57 @@ async function encodeToSheet(
   console.log("TimeStamp: \n", additionalContext.TimeStamp);
   console.log("Row to append:\n", rowJson);
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  // =========================
+  // Skip user confirmation when autoAppend is true
+  // =========================
+  if (!autoAppend) {
+    console.log("TimeStamp: \n", additionalContext.TimeStamp);
+    console.log("Row to append:\n", rowJson);
 
-  let confirm;
-  let fallbackTriggered = false;
-  confirm = await Promise.race([
-    new Promise((resolve) => {
-      rl.question("Proceed with appending this row? (y/n): ", (ans) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    let confirm;
+    let fallbackTriggered = false;
+    confirm = await Promise.race([
+      new Promise((resolve) => {
+        rl.question("Proceed with appending this row? (y/n): ", (ans) => {
+          rl.close();
+          resolve(ans.trim().toLowerCase());
+        });
+      }),
+      (async () => {
+        await new Promise((r) => setTimeout(r, 10000));
         rl.close();
-        resolve(ans.trim().toLowerCase());
-      });
-    }),
-    (async () => {
-      await new Promise((r) => setTimeout(r, 10000));
-      rl.close();
-      console.log(
-        "\n No response after 30 seconds — running fallback before proceeding..."
-      );
-      await appendToLeadDatabase({
-        rowJson,
-        additionalContext,
-        setErrorOccurred,
-        setErrorContext,
-        addTotalToBeApproved,
-        spreadsheetId,
-        sheetName,
-      }); // await async fallback before continuing
-      fallbackTriggered = true;
-      return "fallback";
-    })(),
-  ]);
+        console.log(
+          "\n No response after 10 seconds — running fallback before proceeding..."
+        );
+        await appendToLeadDatabase({
+          rowJson,
+          additionalContext,
+          setErrorOccurred,
+          setErrorContext,
+          addTotalToBeApproved,
+          spreadsheetId,
+          sheetName,
+        });
+        fallbackTriggered = true;
+        return "fallback";
+      })(),
+    ]);
 
-  if (fallbackTriggered) {
-    // Only append to DB, do not append to sheet or call postAfterEncoding
-    return false;
-  }
+    if (fallbackTriggered) {
+      return false;
+    }
 
-  if (confirm !== "y" && confirm !== "yes") {
-    console.log(`Skipped appending to "${sheetName}"`);
-    return false;
+    if (confirm !== "y" && confirm !== "yes") {
+      console.log(`Skipped appending to "${sheetName}"`);
+      return false;
+    }
+  } else {
+    console.log(`[auto-append] Skipping confirmation for "${sheetName}"`);
   }
 
   // Append the row
@@ -171,7 +181,7 @@ async function encodeToSheet(
     addToTotalEncoded(1);
   }
 
-  const nextRow = allValues.length + 1; // calculate before appending if needed
+  const nextRow = allValues.length + 1;
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
 
   // After successful append, run async post request before ending
@@ -295,8 +305,6 @@ async function appendToLeadDatabase({
   }
 }
 
-
-
 async function encodeLeadFromRequest({
   spreadsheetId,
   sheetName,
@@ -339,33 +347,30 @@ async function encodeLeadFromRequest({
     // 2️  Construct the row data
     const rowJson = {
       "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
-      "For scheduling": leadData.for_scheduling || "",
-      "sales person": leadData.sales_person || "",
-      "sales person email": leadData.sales_person_email || "",
-      company: leadData.company || "",
+      "For scheduling": leadData.for_scheduling || "none",
+      "sales person": leadData.sales_person || "none",
+      "sales person email": leadData.sales_person_email || "none",
+      company: leadData.company || "none",
       "company phone#": leadData.company_phone || "none",
       "phone#from email": leadData.phone_from_email || "none",
-      "lead first name": leadData.lead_first_name || "",
-      "lead last name": leadData.lead_last_name || "",
-      "lead email": leadData.lead_email || "",
-      "Column 2": leadData.lead_email || "",
-      "email reply": leadData.email_reply || "",
-      "phone 1": leadData.phone_1 || "",
-      "#": leadData.phone_number || leadData.phone_1 || "",
-      phone2: leadData.phone_2 || "",
-      address: leadData.address || "",
-      city: leadData.city || "",
-      state: leadData.state || "",
-      zip: leadData.zip || "",
-      details: leadData.details || "",
-      "Email Signature": leadData.email_signature || "",
-      "linkedin link": leadData.linkedin_link || "none",
-      "2nd contact person linked":
-        leadData.second_contact_person_linked || "none",
-      "status after the call": leadData.status_after_call || "none",
-      "number of calls spoken with the leads":
-        leadData.number_of_calls_spoken_with_leads || "",
-      "@dropdown": leadData.dropdown || "",
+      "lead first name": leadData.lead_first_name || "none",
+      "lead last name": leadData.lead_last_name || "none",
+      "lead email": leadData.lead_email || "none",
+      "Column 2": leadData.lead_email || "none",
+      "email reply": leadData.email_reply || "none",
+      "phone 1": leadData.phone_1 || "none",
+      "#": leadData.phone_number || leadData.phone_1 || "none",
+      phone2: leadData.phone_2 || "none",
+      address: leadData.address || "none",
+      city: leadData.city || "none",
+      state: leadData.state || "none",
+      zip: leadData.zip || "none",
+      details: leadData.details || "none",
+      // "Email Signature": leadData.email_signature || "none",
+      "Email Signature": "none",
+      // "Email Signature": extracted.signature || emailSignature || "none",
+      "linkedin link": "none",
+      "status after the call": "none",
     };
 
     // 3️ Get existing rows
@@ -579,5 +584,5 @@ markToBeApprovedLead = async (req, res) => {
 module.exports = {
   encodeToSheet,
   encodeLeadFromRequest,
-  markToBeApprovedLead
+  markToBeApprovedLead,
 };

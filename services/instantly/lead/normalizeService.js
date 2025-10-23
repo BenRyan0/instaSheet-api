@@ -4,8 +4,8 @@ async function normalizeRow(emailRow) {
   return {
     "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "",
-    "sales person": emailRow["sales person"] || "",
-    "sales person email": emailRow["sales person email"] || "",
+    "sales person": emailRow["sales person"] || "none",
+    "sales person email": emailRow["sales person email"] || "none",
     company: emailRow["company"] || "N/A",
     "company phone#":
       emailRow["company phone#"] ||
@@ -13,25 +13,24 @@ async function normalizeRow(emailRow) {
       emailRow["phone2"] ||
       "none",
     "phone#from email": emailRow["phone#from email"] || "none",
-    "lead first name": emailRow["lead first name"] || "",
-    "lead last name": emailRow["lead last name"] || "",
-    "lead email": emailRow["lead email"] || "",
-    "Column 2": emailRow["lead email"] || "",
-    "email reply": emailRow["email reply"] || "",
-    "phone 1": emailRow["phone 1"] || "",
-    "#": emailRow["phone 1"] || "",
-    phone2: emailRow.phone2 || "",
-    address: emailRow.address || "",
-    city: emailRow.city || "",
-    state: emailRow.state || "",
-    zip: emailRow.zip || "",
-    details: emailRow.details || "",
-    "Email Signature": emailRow["Email Signature"] || "",
+    "lead first name": emailRow["lead first name"] || "none",
+    "lead last name": emailRow["lead last name"] || "none",
+    "lead email": emailRow["lead email"] || "none",
+    "Column 2": emailRow["lead email"] || "none",
+    "email reply": emailRow["email reply"] || "none",
+    "phone 1": emailRow["phone 1"] || "none",
+    "#": emailRow["phone 1"] || "none",
+    phone2: emailRow.phone2 || "none",
+    address: emailRow.address || "none",
+    city: emailRow.city || "none",
+    state: emailRow.state || "none",
+   zip: (!emailRow?.zip || emailRow.zip === "NULL") ? "none" : emailRow.zip,
+    details: emailRow.details || "none",
+    "Email Signature": emailRow["Email Signature"] || "none",
+    "Email Signature": "none",
+    // "Email Signature": extracted.signature || emailSignature || "none",
     "linkedin link": "none",
-    "2nd contact person linked": "none",
-    "status after the call": "",
-    "number of calls spoken with the leads ": "",
-    "@dropdown": "",
+    "status after the call": "none",
   };
 }
 
@@ -45,8 +44,6 @@ function normalizeLeadsArray(resp) {
     []
   );
 }
-
-
 
 module.exports = {
   normalizeRow,

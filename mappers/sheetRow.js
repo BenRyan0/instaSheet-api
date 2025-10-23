@@ -7,7 +7,7 @@ async function mapToSheetRow({
   lead,
   email,
   setErrorOccurred,
-  setErrorContext,
+  setErrorContext
 }) {
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";

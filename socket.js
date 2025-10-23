@@ -32,10 +32,11 @@ const init = (server, options = {}) => {
       });
     });
 
-    const instantlyAiController = require("./controllers/instantlyAiController");
+    const webhookController = require("./controllers/instantly/webhookController");
     // --- NEW: Listen for email trigger event ---
     socket.on("new_email_added", async (payload) => {
       console.log("Socket event received: new_email_added", payload);
+
 
       try {
         const opts = {
@@ -49,7 +50,7 @@ const init = (server, options = {}) => {
           aiInterestThreshold: 1,
         };
 
-        await instantlyAiController.encodeInterestedRepliesByWebhook({
+        await webhookController.encodeInterestedRepliesByWebhook({
           opts,
           sheetName: "MCA Loan",
           useWebhook: true,

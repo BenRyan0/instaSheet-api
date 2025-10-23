@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const loggerController = require("../controllers/loggerController");
-const { encodeLeadFromRequest,markToBeApprovedLead } = require("../services/leadServices");
+const { encodeLeadFromRequest,markToBeApprovedLead } = require("../services/instantly/lead/encodeService");
 
 router.post("/log/add-new-log", loggerController.addNewLog);
 router.get("/log/get-all-logs", loggerController.getAllLogs);

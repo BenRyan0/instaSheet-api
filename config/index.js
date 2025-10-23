@@ -11,8 +11,17 @@ const LEADS_LIST_PATH =
 // Instantly.ai emails api end point
 const EMAILS_PATH = process.env.EMAILS_PATH?.trim() || "/api/v2/emails";
 
+const CAMPAIGNS_PATH = process.env.CAMPAIGNS_PATH?.trim() || "/api/v2/campaigns";
+const CAMPAIGNS_PAGE_SIZE = 10
+
+
+// const BASE_URL = "https://api.instantly.ai/api/v2/campaigns";
+// const PAGE_SIZE = 10;
+
 module.exports = {
   API_BASE,
   LEADS_LIST_PATH,
   EMAILS_PATH,
+  CAMPAIGNS_PATH,
+  CAMPAIGNS_PAGE_SIZE
 };

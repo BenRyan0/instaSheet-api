@@ -1,42 +1,31 @@
-const { responseReturn } = require("../utils/response");
+const { responseReturn } = require("../../utils/response");
 require("dotenv").config({ silent: true });
-const BASE_URL = "https://api.instantly.ai/api/v2/campaigns";
-const PAGE_SIZE = 10;
-const { colorize } = require("../utils/colorLogger");
-const {
-  normalizeRow,
-  isAddressUsBased,
-  isWebsiteUsBased,
-  isActuallyInterested,
-  encodeToSheet,
-} = require("../services/leadServices");
-const redisClient = require("../config/redisClient");
-const { emitProgress } = require("../events/progressEmitter");
-const { normalizeLeadsArray } = require("../utils/leads");
-const { mapToSheetRow } = require("../mappers/sheetRow");
-const { getAuthHeaders } = require("../utils/auth");
+const redisClient = require("../../config/redisClient");
+const { emitProgress } = require("../../events/progressEmitter");
+const { normalizeLeadsArray } = require("../../services/instantly/lead/normalizeService");
+const { mapToSheetRow } = require("../../mappers/sheetRow");
+const { getAuthHeaders } = require("../../utils/auth");
 const {
   fetchLeadsPage,
   getNextCursor,
-  fetchLeadsPageWebhook,
-  incrementFetchedInterestedLead
-} = require("../services/leadServices");
+} = require("../../services/instantly/lead/fetchService");
 const {
   filterNewLeads,
   normalizeKey,
   markProcessed,
-} = require("../services/dedupService");
-const { fetchRepliesForLead } = require("../services/emailService");
-const { isInterestedReply } = require("../utils/filters");
+} = require("../../services/dedupService");
+const { fetchRepliesForLead } = require("../../services/emailService");
+const { isInterestedReply } = require("../../utils/filters");
 const {
   initState,
   shouldContinue,
   summarizeState,
-} = require("../services/stateService");
-const { handleError } = require("../services/errorService");
-// const { handleError } = require("../services/leadServices");
+} = require("../../services/stateService");
+const { handleError } = require("../../services/errorService");
+const loggerController = require(".././loggerController");
+const {processEmailRow} = require("../../services/email/emailProcessing");
 
-const loggerController = require("./loggerController");
+
 
 class instantlyAiController {
   // Global variables accessible from other methods
@@ -79,135 +68,6 @@ class instantlyAiController {
     this.totalToBeApproved += val;
   }
 
-  // process a single email row, must return a Promise<boolean>
-  getAllCampaigns = async (req, res) => {
-    console.log("Fetching all campaigns from Instantly...");
-    try {
-      const headers = {
-        Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
-        "Content-Type": "application/json",
-      };
-
-      let campaigns = [];
-      let cursor = null;
-
-      do {
-        // Build query string
-        const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-        if (cursor) params.set("starting_after", cursor);
-
-        const resp = await fetch(`${BASE_URL}?${params}`, { headers });
-
-        if (!resp.ok) {
-          const errText = await resp.text();
-          return responseReturn(res, resp.status, {
-            error: `Failed to fetch campaigns: ${resp.status} ${errText}`,
-          });
-        }
-
-        const { items = [], next_starting_after } = await resp.json();
-        campaigns = campaigns.concat(items);
-        cursor = next_starting_after || null;
-      } while (cursor);
-
-      console.log("Fetching all campaigns from Instantly -DONE");
-      responseReturn(res, 200, {
-        total: campaigns.length,
-        campaigns,
-      });
-    } catch (err) {
-      console.error("Error fetching all campaigns:", err.message);
-      responseReturn(res, 500, { error: "Failed to fetch all campaigns" });
-    }
-  };
-
-  async processEmailRow({
-    emailRow,
-    sheetName,
-    additionalContext,
-    setErrorOccurred,
-    setErrorContext,
-    addToTotalEncoded,
-    addTotalToBeApproved,
-  }) {
-    console.log(colorize("Processing lead Email ...", "blue"));
-    console.log("additionalContext");
-    console.log(additionalContext);
-    const spreadsheetId = process.env.SPREADSHEET_ID;
-    try {
-      const rowJson = await normalizeRow(emailRow);
-      // --- Step 1: Address present? ---
-      if (
-        rowJson.address ||
-        rowJson.city ||
-        rowJson.state ||
-        rowJson.zip ||
-        rowJson["company phone#"]
-      ) {
-        const usAddress = await isAddressUsBased({
-          city: rowJson.city,
-          state: rowJson.state,
-          address: rowJson.address,
-          zip: rowJson.zip,
-          phone: rowJson["company phone#"],
-          setErrorOccurred,
-          setErrorContext,
-        });
-        if (!usAddress) return true; // Skip but still return true
-
-        const interested = await isActuallyInterested(
-          rowJson["email reply"],
-          this.addTotalEnterestedLLM.bind(this),
-          false
-        );
-        if (interested) {
-          await encodeToSheet(
-            spreadsheetId,
-            sheetName,
-            rowJson,
-            additionalContext,
-            addToTotalEncoded,
-            setErrorOccurred,
-            setErrorContext,
-            addTotalToBeApproved
-          );
-        }
-        return true; // Continue flow regardless
-      }
-      // --- Step 2: Website present? ---
-      if (rowJson.details) {
-        const usWebsite = await isWebsiteUsBased(rowJson.details);
-        if (!usWebsite) return true; // Skip but still return true
-
-        const interested = await isActuallyInterested(
-          rowJson["email reply"],
-          this.addTotalEnterestedLLM.bind(this),
-          false
-        );
-        if (interested) {
-          await encodeToSheet(
-            spreadsheetId,
-            sheetName,
-            rowJson,
-            additionalContext,
-            addToTotalEncoded,
-            setErrorOccurred,
-            setErrorContext,
-            addTotalToBeApproved
-          );
-        }
-        return true; // Continue flow regardless
-      }
-
-      return true;
-    } catch (err) {
-      if (setErrorOccurred) setErrorOccurred(true);
-      if (setErrorContext) setErrorContext(err.message);
-      console.error("processEmailRow failed:", err.message);
-      return true; // Ensure main flow continues even on error
-    }
-  }
-
   stopIncodingRun = async (req, res) => {
     try {
       console.log("STOP INCODING RUNS INITIATED");
@@ -229,7 +89,7 @@ class instantlyAiController {
     var i = 0;
 
     try {
-      const { opts, sheetName, useWebhook } = req.body;
+      const { opts, sheetName } = req.body;
       const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails`;
@@ -254,9 +114,7 @@ class instantlyAiController {
         state.nextPage();
 
         // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
-        const leadFetcher = useWebhook ? fetchLeadsPageWebhook : fetchLeadsPage;
-
-        const page = await leadFetcher({
+        const page = await fetchLeadsPage({
           cursor,
           pageLimit: opts.pageLimit,
           aiThreshold: opts.aiInterestThreshold,
@@ -351,7 +209,7 @@ class instantlyAiController {
               ? new Date(email.timestamp_email)
               : null;
             const now = new Date();
-            const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+            const TWO_WEEKS_MS = 30 * 24 * 60 * 60 * 1000;
 
             if (emailTimestamp && now - emailTimestamp > TWO_WEEKS_MS) {
               console.log(
@@ -447,7 +305,7 @@ class instantlyAiController {
 
             do {
               try {
-                processed = await this.processEmailRow({
+                processed = await processEmailRow({
                   emailRow: row,
                   sheetName,
                   additionalContext,
@@ -504,7 +362,6 @@ class instantlyAiController {
           return responseReturn(res, 500, summary);
         }
       }
-
       // Normal finish
       emitProgress(state);
       const summary = summarizeState(state);
@@ -516,151 +373,6 @@ class instantlyAiController {
     }
   };
 
-  async encodeInterestedRepliesByWebhook({ opts, sheetName, useWebhook }) {
-    this.errorOccurred = false;
-    this.errorContext = null;
-
-    try {
-      const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
-      const dedupKey = `insta:processed_emails`;
-
-      const seenMembers = await redisClient.sMembers(dedupKey);
-      const seen = new Set(seenMembers);
-
-      const state = initState({
-        initialSeenCount: seen.size,
-        maxEmails: opts.maxEmails,
-        maxPages: opts.maxPages,
-        aiInterestThreshold: opts.aiInterestThreshold,
-      });
-
-      let cursor = null;
-
-      while (shouldContinue(state) && !this.errorOccurred) {
-        state.nextPage();
-
-        const leadFetcher = useWebhook ? fetchLeadsPageWebhook : fetchLeadsPage;
-        const page = await leadFetcher({
-          cursor,
-          pageLimit: opts.pageLimit,
-          aiThreshold: opts.aiInterestThreshold,
-          authHeaders,
-          setErrorOccurred: this.setErrorOccurred.bind(this),
-          setErrorContext: this.setErrorContext.bind(this),
-        });
-
-        const leads = normalizeLeadsArray(page);
-        cursor = getNextCursor(page);
-
-        const batch = filterNewLeads(leads, seen);
-        console.log("Batch:", batch.length);
-
-        if (batch.length === 0) continue;
-
-        for (const lead of batch) {
-          const result = await fetchRepliesForLead(lead, {
-            perLeadLimit: opts.emailsPerLead,
-            authHeaders,
-            delayMs: opts.delayMs,
-            setErrorOccurred: this.setErrorOccurred.bind(this),
-            setErrorContext: this.setErrorContext.bind(this),
-            is_unread: opts.is_unread,
-          });
-
-          if (result.error || result.skipped) {
-            const key = normalizeKey(lead.email || lead.id);
-            if (key) await markProcessed(key, redisClient, dedupKey, seen);
-            continue;
-          }
-
-          const interestedEmails = result.emails.filter((e) =>
-            isInterestedReply(e, opts.aiInterestThreshold)
-          );
-
-          if (!interestedEmails.length) continue;
-
-          for (const email of interestedEmails) {
-            const emailKey = normalizeKey(lead.email || lead.id);
-            const key = emailKey || lead.id;
-
-            const emailTimestamp = new Date(
-              email?.timestamp_email || Date.now()
-            );
-            const age = Date.now() - emailTimestamp.getTime();
-            if (age > 14 * 24 * 60 * 60 * 1000) continue;
-
-            const emailBodyText = email.body?.text || "";
-            const wordCount = emailBodyText.split(/\s+/).filter(Boolean).length;
-            if (wordCount > 500) continue;
-
-            let row;
-            try {
-              row = await mapToSheetRow({
-                lead,
-                email,
-                setErrorOccurred: this.setErrorOccurred.bind(this),
-                setErrorContext: this.setErrorContext.bind(this),
-              });
-            } catch (e) {
-              console.warn("mapToSheetRow failed:", e.message);
-              if (key) await markProcessed(key, redisClient, dedupKey, seen);
-              continue;
-            }
-
-            let processed = false;
-            let attempts = 0;
-            while (!processed && attempts < 3) {
-              attempts++;
-              try {
-                processed = await this.processEmailRow({
-                  emailRow: row,
-                  sheetName,
-                  additionalContext: {
-                    ClientID: lead.id || "N/A",
-                    Category: lead.category || "Uncategorized",
-                    TimeStamp:
-                      email.timestamp_email || new Date().toISOString(),
-                  },
-                  addToTotalEncoded: this.addToTotalEncoded.bind(this),
-                  setErrorOccurred: this.setErrorOccurred.bind(this),
-                  setErrorContext: this.setErrorContext.bind(this),
-                  addTotalToBeApproved: this.addTotalToBeApproved.bind(this),
-                });
-              } catch (err) {
-                console.warn(
-                  `processEmailRow failed (try ${attempts})`,
-                  err.message
-                );
-                await new Promise((r) => setTimeout(r, 500 * attempts));
-              }
-            }
-
-            if (processed) {
-              state.collect(row, true);
-              if (key) await markProcessed(key, redisClient, dedupKey, seen);
-            }
-          }
-        }
-
-        if (this.errorOccurred) {
-          console.log("Error occurred mid-loop");
-          break;
-        }
-      }
-
-
-      // const summary = summarizeState(state);
-      // await loggerController.addNewLog(summary);
-      await incrementFetchedInterestedLead();
-      console.log("Interested Lead -DONE:");
-      // console.log("Interested Lead -DONE:", summary);
-      return true;
-    } catch (err) {
-      console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);
-      return { error: true, message: err.message };
-    }
-  }
- 
 }
 
 module.exports = new instantlyAiController();

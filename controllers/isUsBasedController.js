@@ -1,4 +1,4 @@
-const { spawn } = require("child_process");
+const { spawn } = require('child_process');
 const { responseReturn } = require("../utils/response");
 
 class isUsBased {

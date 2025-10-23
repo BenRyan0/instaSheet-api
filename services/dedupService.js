@@ -4,14 +4,10 @@ function normalizeKey(email) {
   if (!email || typeof email !== 'string') return null
   return email.toLowerCase().trim()
 }
-
-
 async function isProcessed(emailKey, redisClient, redisKey) {
   if (!emailKey) return false
   return await redisClient.sIsMember(redisKey, emailKey)
 }
-
-
 async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
   if (!emailKey) return false
 
@@ -35,7 +31,6 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
     return false
   }
 }
-
 function filterNewLeads(leads, processed) {
   console.log("filterNewLeads");
   return leads.filter(lead => {
@@ -48,8 +43,6 @@ function filterNewLeads(leads, processed) {
     return true;
   });
 }
-
-
 
 module.exports = {
   normalizeKey,

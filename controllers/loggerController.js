@@ -53,14 +53,18 @@ class loggerController {
     console.log("GET ALL LOGS");
     try {
       const query = `
-      SELECT 
-        COALESCE(a.approval_date, f.date_fetched) AS date,
+     SELECT 
+        COALESCE(a.approval_date, f.date_fetched, c.appended_date) AS date,
         COALESCE(a.approved_count, 0) AS approved,
-        COALESCE(f.fetched_count, 0) AS fetched
+        COALESCE(f.fetched_count, 0) AS fetched,
+        COALESCE(c.appended_count, 0) AS appended
       FROM approved_encoding_lead a
       FULL OUTER JOIN fetched_interested_lead f
         ON a.approval_date = f.date_fetched
+      FULL OUTER JOIN appended_to_crm c
+        ON COALESCE(a.approval_date, f.date_fetched) = c.appended_date
       ORDER BY date;
+
     `;
 
       const result = await con.query(query);

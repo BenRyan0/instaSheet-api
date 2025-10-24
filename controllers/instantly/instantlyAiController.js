@@ -2,7 +2,9 @@ const { responseReturn } = require("../../utils/response");
 require("dotenv").config({ silent: true });
 const redisClient = require("../../config/redisClient");
 const { emitProgress } = require("../../events/progressEmitter");
-const { normalizeLeadsArray } = require("../../services/instantly/lead/normalizeService");
+const {
+  normalizeLeadsArray,
+} = require("../../services/instantly/lead/normalizeService");
 const { mapToSheetRow } = require("../../mappers/sheetRow");
 const { getAuthHeaders } = require("../../utils/auth");
 const {
@@ -23,9 +25,7 @@ const {
 } = require("../../services/stateService");
 const { handleError } = require("../../services/errorService");
 const loggerController = require(".././loggerController");
-const {processEmailRow} = require("../../services/email/emailProcessing");
-
-
+const { processEmailRow } = require("../../services/email/emailProcessing");
 
 class instantlyAiController {
   // Global variables accessible from other methods
@@ -242,17 +242,8 @@ class instantlyAiController {
             }
 
             let row;
-            let additionalContext = {};
+
             try {
-              // Add contextual info
-              // the ClientId and Category to be placed in the tags
-              additionalContext = {
-                ClientID: lead?.id ?? "N/A",
-                TimeStamp: email?.timestamp_email ?? new Date().toISOString(),
-                // timestamp_email
-                Category:
-                  lead?.payload?.category ?? lead?.category ?? "Uncategorized",
-              };
 
               if (
                 !email.content_preview ||
@@ -276,6 +267,7 @@ class instantlyAiController {
                 setErrorOccurred: this.setErrorOccurred.bind(this),
                 setErrorContext: this.setErrorContext.bind(this),
               });
+
               console.log("MAP TO SHEET ROW RESULT");
               console.log(row);
             } catch (e) {
@@ -308,7 +300,12 @@ class instantlyAiController {
                 processed = await processEmailRow({
                   emailRow: row,
                   sheetName,
-                  additionalContext,
+                  additionalContext: {
+                    ClientID: lead.id || "N/A",
+                    Category: lead.category || lead.categories || "Uncategorized",
+                    TimeStamp:
+                      email.timestamp_email || new Date().toISOString(),
+                  },
                   addToTotalEncoded: this.addToTotalEncoded.bind(this),
                   setErrorOccurred: this.setErrorOccurred.bind(this),
                   setErrorContext: this.setErrorContext.bind(this),
@@ -356,6 +353,7 @@ class instantlyAiController {
           state.errorContext = this.errorContext;
           state.stoppedEarly = true;
           emitProgress(state);
+          console.log(this.errorContext)
 
           const summary = summarizeState(state);
           await loggerController.addNewLog(summary);
@@ -372,7 +370,6 @@ class instantlyAiController {
       return handleError(err, res);
     }
   };
-
 }
 
 module.exports = new instantlyAiController();

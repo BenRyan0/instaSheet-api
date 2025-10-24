@@ -1,4 +1,7 @@
-const { extractReply } = require("../services/emailParserService");
+const {
+  extractReply,
+  extractBusinessDescription,
+} = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
 require("dotenv").config({ quiet: true });
@@ -7,7 +10,7 @@ async function mapToSheetRow({
   lead,
   email,
   setErrorOccurred,
-  setErrorContext
+  setErrorContext,
 }) {
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
@@ -36,6 +39,7 @@ async function mapToSheetRow({
     console.log("Email body exceeds 500 words; skipping extraction");
     throw new Error("Email body exceeds 500 words; skipping extraction");
   }
+
 
   // Use AI-powered extraction
   const extracted = await extractReply({
@@ -119,15 +123,22 @@ async function mapToSheetRow({
     "lead last name": lastName || "none",
     "lead email": leadEmail,
     "Column 2": leadEmail,
-    "email reply": extracted.reply || "none",
+    "email reply": extracted.reply || "",
     "phone 1": phone1,
     "#": phone1, // keeping same as phone 1
     phone2: phone2,
-    address: lead?.payload?.street || payload.address || lead?.address || "none",
+    address:
+      lead?.payload?.street || payload.address || lead?.address || "none",
     city: payload?.city || lead?.city || "none",
-    state: payload?.state || lead?.state || payload?.organization_state || "none",
-    zip: payload?.zip || payload?.zip_code || payload?.organization_postal_code || "none",
+    state:
+      payload?.state || lead?.state || payload?.organization_state || "none",
+    zip:
+      payload?.zip ||
+      payload?.zip_code ||
+      payload?.organization_postal_code ||
+      "none",
     details: payload?.details || lead?.details || lead?.website || "none",
+    // details: leadDescription || "none",
     "Email Signature": "none",
     // "Email Signature": extracted.signature || emailSignature || "",
     "linkedin link": "none",

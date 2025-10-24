@@ -1,31 +1,31 @@
 require("dotenv").config({ silent: true });
 const axios = require("axios");
 const { initGoogleClients } = require("../../../services/googleClient.js");
+const { google } = require("googleapis");
 const readline = require("readline");
 const con = require("../../../db/db.js");
 const { responseReturn } = require("../../../utils/response.js");
 const { postAfterEncoding } = require("../../CRM/perfexCrm");
 const FormData = require("form-data");
 
-async function encodeToSheet(
-  spreadsheetId,
-  sheetName,
-  rowJson,
-  additionalContext,
-  addToTotalEncoded,
-  setErrorOccurred,
-  setErrorContext,
-  addTotalToBeApproved,
-  autoAppend = true
-) {
-  const { sheets } = await initGoogleClients();
+async function getSheetMetadata(sheets, spreadsheetId, sheetName) {
+  try {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+    const targetSheet = meta.data.sheets.find(
+      (s) => s.properties.title === sheetName
+    );
+    return { meta, existingTabs, targetSheet };
+  } catch (err) {
+    console.warn(
+      `[warning] Cannot access Google Sheet "${spreadsheetId}" or tab "${sheetName}": ${err.message}`
+    );
+    return null; // Mark as inaccessible
+  }
+}
 
-  // Ensure tab exists and headers are in row 1
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
-  const existingTabs = meta.data.sheets.map((s) => s.properties.title);
-  const targetSheet = meta.data.sheets.find(
-    (s) => s.properties.title === sheetName
-  );
+async function ensureSheetAndHeaders(sheets, spreadsheetId, sheetName, rowJson, metaData) {
+  const { existingTabs, targetSheet } = metaData;
 
   if (!existingTabs.includes(sheetName)) {
     await sheets.spreadsheets.batchUpdate({
@@ -44,14 +44,10 @@ async function encodeToSheet(
     });
   }
 
-  // Target Shhet
-  if (!targetSheet) {
-    throw new Error(`Sheet "${sheetName}" not found`);
-  }
+  const sheetId = (targetSheet || {}).properties?.sheetId;
+  if (!sheetId) throw new Error(`Sheet "${sheetName}" not found`);
 
-  const sheetId = targetSheet.properties.sheetId;
-
-  // Read all existing rows
+  // Ensure headers are correct
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: sheetName,
@@ -71,9 +67,13 @@ async function encodeToSheet(
     });
   }
 
-  // Deduplication setup
+  return { sheetId, allValues, headers };
+}
+
+function checkForDuplicates(allValues, headers, rowJson, sheetName) {
   const leadIdx = headers.indexOf("lead email");
   const replyIdx = headers.indexOf("email reply");
+
   if (leadIdx === -1 || replyIdx === -1) {
     throw new Error(
       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
@@ -82,6 +82,7 @@ async function encodeToSheet(
 
   const existingLeadEmails = new Set();
   const existingPairs = new Set();
+
   for (let i = 1; i < allValues.length; i++) {
     const row = allValues[i];
     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
@@ -94,97 +95,149 @@ async function encodeToSheet(
   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
   if (existingLeadEmails.has(newLeadEmail)) {
-    console.log(
-      `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-    );
-    return { success: false, reason: "duplicate-lead-email" };
+    console.log(`[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`);
+    return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
   const pairKey = `${newLeadEmail}|${newEmailReply}`;
   if (existingPairs.has(pairKey)) {
-    console.log(
-      `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-    );
-    return { success: false, reason: "duplicate-lead-email" };
+    console.log(`[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
+    return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
-  // Preview and confirm (with async timeout)
-  console.log("TimeStamp: \n", additionalContext.TimeStamp);
-  console.log("Row to append:\n", rowJson);
+  return { duplicate: false };
+}
 
-  // =========================
-  // Skip user confirmation when autoAppend is true
-  // =========================
-  if (!autoAppend) {
-    console.log("TimeStamp: \n", additionalContext.TimeStamp);
-    console.log("Row to append:\n", rowJson);
+async function confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, fallbackFn) {
+  if (autoAppend) {
+    console.log(`[auto-append] Skipping confirmation`);
+    return true;
+  }
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+  console.log("TimeStamp:", additionalContext.TimeStamp);
+  console.log("Row to append:", rowJson);
 
-    let confirm;
-    let fallbackTriggered = false;
-    confirm = await Promise.race([
-      new Promise((resolve) => {
-        rl.question("Proceed with appending this row? (y/n): ", (ans) => {
-          rl.close();
-          resolve(ans.trim().toLowerCase());
-        });
-      }),
-      (async () => {
-        await new Promise((r) => setTimeout(r, 10000));
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  let fallbackTriggered = false;
+  const confirm = await Promise.race([
+    new Promise((resolve) => {
+      rl.question("Proceed with appending this row? (y/n): ", (ans) => {
         rl.close();
-        console.log(
-          "\n No response after 10 seconds — running fallback before proceeding..."
-        );
-        await appendToLeadDatabase({
-          rowJson,
-          additionalContext,
-          setErrorOccurred,
-          setErrorContext,
-          addTotalToBeApproved,
-          spreadsheetId,
-          sheetName,
-        });
-        fallbackTriggered = true;
-        return "fallback";
-      })(),
-    ]);
+        resolve(ans.trim().toLowerCase());
+      });
+    }),
+    (async () => {
+      await new Promise((r) => setTimeout(r, 10000));
+      rl.close();
+      console.log("\nNo response after 10 seconds — running fallback...");
+      await fallbackFn();
+      fallbackTriggered = true;
+      return "fallback";
+    })(),
+  ]);
 
-    if (fallbackTriggered) {
-      return false;
-    }
-
-    if (confirm !== "y" && confirm !== "yes") {
-      console.log(`Skipped appending to "${sheetName}"`);
-      return false;
-    }
-  } else {
-    console.log(`[auto-append] Skipping confirmation for "${sheetName}"`);
+  if (fallbackTriggered) return false;
+  if (confirm !== "y" && confirm !== "yes") {
+    console.log("Skipped appending to sheet.");
+    return false;
   }
 
-  // Append the row
+  return true;
+}
+
+async function appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson) {
   const rowValues = headers.map((h) => rowJson[h] ?? "");
-  const appendResp = await sheets.spreadsheets.values.append({
+  return await sheets.spreadsheets.values.append({
     spreadsheetId,
     range: `${sheetName}!A:A`,
     valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: [rowValues] },
   });
+}
 
-  console.log(`Appended row to "${sheetName}"`);
+async function encodeToSheet(
+  spreadsheetId,
+  sheetName,
+  rowJson,
+  additionalContext,
+  addToTotalEncoded,
+  setErrorOccurred,
+  setErrorContext,
+  addTotalToBeApproved,
+  autoAppend = true
+) {
+  const { sheets } = await initGoogleClients();
 
-  if (typeof addToTotalEncoded === "function") {
-    addToTotalEncoded(1);
+  // =========================
+  // STEP 1: Access sheet or fallback
+  // =========================
+  const metaData = await getSheetMetadata(sheets, spreadsheetId, sheetName);
+  if (!metaData) {
+    console.log(`[fallback] Proceeding directly to database encoding...`);
+    await appendToLeadDatabase({
+      rowJson,
+      additionalContext,
+      setErrorOccurred,
+      setErrorContext,
+      addTotalToBeApproved,
+      spreadsheetId,
+      sheetName,
+    });
+    return { success: false, reason: "sheet-inaccessible-fallback" };
   }
 
+  // =========================
+  // STEP 2: Ensure sheet & headers
+  // =========================
+  const { sheetId, allValues, headers } = await ensureSheetAndHeaders(
+    sheets,
+    spreadsheetId,
+    sheetName,
+    rowJson,
+    metaData
+  );
+
+  // =========================
+  // STEP 3: Deduplication
+  // =========================
+  const dupCheck = checkForDuplicates(allValues, headers, rowJson, sheetName);
+  if (dupCheck.duplicate) return { success: false, reason: dupCheck.reason };
+
+  // =========================
+  // STEP 4: Confirmation or auto-append
+  // =========================
+  const proceed = await confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, async () => {
+    await appendToLeadDatabase({
+      rowJson,
+      additionalContext,
+      setErrorOccurred,
+      setErrorContext,
+      addTotalToBeApproved,
+      spreadsheetId,
+      sheetName,
+    });
+  });
+
+  if (!proceed) return false;
+
+  // =========================
+  // STEP 5: Append row
+  // =========================
+  const appendResp = await appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson);
+  console.log(`Appended row to "${sheetName}"`);
+
+  if (typeof addToTotalEncoded === "function") addToTotalEncoded(1);
+
+  // =========================
+  // STEP 6: Post-processing
+  // =========================
   const nextRow = allValues.length + 1;
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
-
-  // After successful append, run async post request before ending
   await postAfterEncoding({
     rowJson,
     sheetUrl,
@@ -194,6 +247,280 @@ async function encodeToSheet(
   });
 
   return appendResp.data ? true : false;
+}
+
+// async function encodeToSheet(
+//   spreadsheetId,
+//   sheetName,
+//   rowJson,
+//   additionalContext,
+//   addToTotalEncoded,
+//   setErrorOccurred,
+//   setErrorContext,
+//   addTotalToBeApproved,
+//   autoAppend = true
+// ) {
+//   const { sheets } = await initGoogleClients();
+
+//   // Ensure tab exists and headers are in row 1
+//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
+//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
+//   const targetSheet = meta.data.sheets.find(
+//     (s) => s.properties.title === sheetName
+//   );
+
+//   if (!existingTabs.includes(sheetName)) {
+//     await sheets.spreadsheets.batchUpdate({
+//       spreadsheetId,
+//       requestBody: {
+//         requests: [{ addSheet: { properties: { title: sheetName } } }],
+//       },
+//     });
+
+//     const headers = Object.keys(rowJson);
+//     await sheets.spreadsheets.values.update({
+//       spreadsheetId,
+//       range: `${sheetName}!A1`,
+//       valueInputOption: "RAW",
+//       requestBody: { values: [headers] },
+//     });
+//   }
+
+//   // Target Shhet
+//   if (!targetSheet) {
+//     throw new Error(`Sheet "${sheetName}" not found`);
+//   }
+
+//   const sheetId = targetSheet.properties.sheetId;
+
+//   // Read all existing rows
+//   const resp = await sheets.spreadsheets.values.get({
+//     spreadsheetId,
+//     range: sheetName,
+//   });
+
+//   const allValues = resp.data.values || [];
+//   let headers = allValues[0] || [];
+//   const expectedHeaders = Object.keys(rowJson);
+
+//   if (!headers.length || headers.length !== expectedHeaders.length) {
+//     headers = expectedHeaders;
+//     await sheets.spreadsheets.values.update({
+//       spreadsheetId,
+//       range: `${sheetName}!A1`,
+//       valueInputOption: "RAW",
+//       requestBody: { values: [headers] },
+//     });
+//   }
+
+//   // Deduplication setup
+//   const leadIdx = headers.indexOf("lead email");
+//   const replyIdx = headers.indexOf("email reply");
+//   if (leadIdx === -1 || replyIdx === -1) {
+//     throw new Error(
+//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
+//     );
+//   }
+
+//   const existingLeadEmails = new Set();
+//   const existingPairs = new Set();
+//   for (let i = 1; i < allValues.length; i++) {
+//     const row = allValues[i];
+//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
+//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
+//     if (leadEmail) existingLeadEmails.add(leadEmail);
+//     existingPairs.add(`${leadEmail}|${emailReply}`);
+//   }
+
+//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
+//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
+
+//   if (existingLeadEmails.has(newLeadEmail)) {
+//     console.log(
+//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
+//     );
+//     return { success: false, reason: "duplicate-lead-email" };
+//   }
+
+//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
+//   if (existingPairs.has(pairKey)) {
+//     console.log(
+//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+//     );
+//     return { success: false, reason: "duplicate-lead-email" };
+//   }
+
+//   // Preview and confirm (with async timeout)
+//   console.log("TimeStamp: \n", additionalContext.TimeStamp);
+//   console.log("Row to append:\n", rowJson);
+
+//   // =========================
+//   // Skip user confirmation when autoAppend is true
+//   // =========================
+//   if (!autoAppend) {
+//     console.log("TimeStamp: \n", additionalContext.TimeStamp);
+//     console.log("Row to append:\n", rowJson);
+
+//     const rl = readline.createInterface({
+//       input: process.stdin,
+//       output: process.stdout,
+//     });
+
+//     let confirm;
+//     let fallbackTriggered = false;
+//     confirm = await Promise.race([
+//       new Promise((resolve) => {
+//         rl.question("Proceed with appending this row? (y/n): ", (ans) => {
+//           rl.close();
+//           resolve(ans.trim().toLowerCase());
+//         });
+//       }),
+//       (async () => {
+//         await new Promise((r) => setTimeout(r, 10000));
+//         rl.close();
+//         console.log(
+//           "\n No response after 10 seconds — running fallback before proceeding..."
+//         );
+//         await appendToLeadDatabase({
+//           rowJson,
+//           additionalContext,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           spreadsheetId,
+//           sheetName,
+//         });
+//         fallbackTriggered = true;
+//         return "fallback";
+//       })(),
+//     ]);
+
+//     if (fallbackTriggered) {
+//       return false;
+//     }
+
+//     if (confirm !== "y" && confirm !== "yes") {
+//       console.log(`Skipped appending to "${sheetName}"`);
+//       return false;
+//     }
+//   } else {
+//     console.log(`[auto-append] Skipping confirmation for "${sheetName}"`);
+//   }
+
+//   // Append the row
+//   const rowValues = headers.map((h) => rowJson[h] ?? "");
+//   const appendResp = await sheets.spreadsheets.values.append({
+//     spreadsheetId,
+//     range: `${sheetName}!A:A`,
+//     valueInputOption: "RAW",
+//     insertDataOption: "INSERT_ROWS",
+//     requestBody: { values: [rowValues] },
+//   });
+
+//   console.log(`Appended row to "${sheetName}"`);
+
+//   if (typeof addToTotalEncoded === "function") {
+//     addToTotalEncoded(1);
+//   }
+
+//   const nextRow = allValues.length + 1;
+//   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
+
+//   // After successful append, run async post request before ending
+//   await postAfterEncoding({
+//     rowJson,
+//     sheetUrl,
+//     additionalContext,
+//     setErrorOccurred,
+//     setErrorContext,
+//   });
+
+//   return appendResp.data ? true : false;
+// }
+
+async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
+  try {
+    const { sheets } = await initGoogleClients();
+
+    // 1️⃣ Check if credentials are valid
+    try {
+      await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: "spreadsheetId,sheets.properties.title",
+      });
+    } catch (authErr) {
+      if (authErr.code === 403 || authErr.code === 401) {
+        return {
+          status: "error",
+          reason: "service-account-unauthorized",
+          details:
+            "The service account credentials are invalid or lack access to the spreadsheet.",
+        };
+      } else if (authErr.code === 404) {
+        return {
+          status: "error",
+          reason: "spreadsheet-not-found",
+          details:
+            "The spreadsheet ID may be incorrect or deleted.",
+        };
+      } else if (authErr.message?.includes("violates our Terms")) {
+        return {
+          status: "error",
+          reason: "sheet-flagged-by-google",
+          details:
+            "The sheet was restricted by Google for policy violations. You must request a review in Google Drive.",
+        };
+      } else {
+        throw authErr;
+      }
+    }
+
+    // 2️⃣ Get sheet metadata again (if we reach here, credentials are fine)
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties.title",
+    });
+    const sheetTitles = meta.data.sheets.map((s) => s.properties.title);
+
+    // 3️⃣ Check if the sheet/tab exists
+    if (sheetName && !sheetTitles.includes(sheetName)) {
+      return {
+        status: "warning",
+        reason: "sheet-tab-missing",
+        details: `Sheet tab "${sheetName}" not found in spreadsheet. Available sheets: ${sheetTitles.join(", ")}`,
+      };
+    }
+
+    // 4️⃣ Try to read data from the first row
+    const testRange = sheetName ? `${sheetName}!A1:A1` : "A1:A1";
+    try {
+      await sheets.spreadsheets.values.get({ spreadsheetId, range: testRange });
+    } catch (readErr) {
+      if (readErr.code === 403) {
+        return {
+          status: "error",
+          reason: "sheet-read-permission-denied",
+          details:
+            "The service account does not have permission to read data from this sheet.",
+        };
+      } else {
+        throw readErr;
+      }
+    }
+
+    // ✅ All checks passed
+    return {
+      status: "ok",
+      reason: "sheet-accessible",
+      details: `Service account can access and read from sheet${sheetName ? ` "${sheetName}"` : ""}.`,
+    };
+  } catch (err) {
+    return {
+      status: "error",
+      reason: "unexpected-error",
+      details: err.message,
+    };
+  }
 }
 
 // Called when no user response within 30 seconds
@@ -585,4 +912,5 @@ module.exports = {
   encodeToSheet,
   encodeLeadFromRequest,
   markToBeApprovedLead,
+  diagnoseGoogleSheetAccess
 };

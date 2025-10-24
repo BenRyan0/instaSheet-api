@@ -72,10 +72,10 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
     console.warn("Unexpected AI response, falling back:", replyContent);
 
     return false; // fallback
-  } catch (err) {
+  } catch (error) {
     console.error("Error classifying with AI:");
     if (setErrorOccurred) setErrorOccurred(true); // Mark error on failure
-    if (setErrorContext) setErrorContext(err.message);
+     if (setErrorContext) setErrorContext(`isUSByAI: ${error.message}`);
     return false;
   }
 }
@@ -185,7 +185,7 @@ async function isAddressUsBased({
   } catch (error) {
     console.error(error);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
+    if (setErrorContext) setErrorContext(`isAddressUsBased: ${error.message}`);
     return false;
   }
 }

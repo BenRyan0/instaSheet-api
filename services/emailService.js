@@ -75,10 +75,10 @@ async function fetchRepliesForLead(
     );
 
     return { lead, emails, success: true };
-  } catch (err) {
-    console.error(`fetchRepliesForLead ERROR for ${lead.email}:`, err.message);
+  } catch (error) {
+    console.error(`fetchRepliesForLead : ${lead.email}:`, error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(err.message);
+    if (setErrorContext) setErrorContext(`fetchRepliesForLead : ${err.message}`);
     return { lead, emails: [], error: err.message, success: false };
   }
 }

@@ -2,7 +2,7 @@ require("dotenv").config({ silent: true });
 const { getAuthHeaders } = require("../../utils/auth");
 const redisClient = require("../../config/redisClient");
 const {
-  fetchLeadsPageWebhook
+  fetchLeadsPageWebhook,
 } = require("../../services/instantly/lead/fetchService");
 const {
   normalizeLeadsArray,
@@ -201,6 +201,11 @@ class webhookController {
 
         if (errorOccurred) {
           console.log("Error occurred mid-loop");
+          if (this.errorContext) {
+            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
+            console.log(this.errorContext);
+            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
+          }
           break;
         }
       }

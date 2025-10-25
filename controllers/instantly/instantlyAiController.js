@@ -244,7 +244,6 @@ class instantlyAiController {
             let row;
 
             try {
-
               if (
                 !email.content_preview ||
                 email.content_preview.trim() === ""
@@ -302,7 +301,8 @@ class instantlyAiController {
                   sheetName,
                   additionalContext: {
                     ClientID: lead.id || "N/A",
-                    Category: lead.category || lead.categories || "Uncategorized",
+                    Category:
+                      lead.category || lead.categories || "Uncategorized",
                     TimeStamp:
                       email.timestamp_email || new Date().toISOString(),
                   },
@@ -353,7 +353,11 @@ class instantlyAiController {
           state.errorContext = this.errorContext;
           state.stoppedEarly = true;
           emitProgress(state);
-          console.log(this.errorContext)
+          if (this.errorContext) {
+            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
+            console.log(this.errorContext);
+            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
+          }
 
           const summary = summarizeState(state);
           await loggerController.addNewLog(summary);

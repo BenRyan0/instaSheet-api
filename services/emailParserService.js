@@ -239,8 +239,6 @@ async function extractBusinessDescription({
   }
 }
 
-
-
 function normalizeSchema(obj = {}) {
   return {
     reply: obj.reply || "",

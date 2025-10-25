@@ -4,7 +4,6 @@ const redisClient = require("../../../config/redisClient.js");
 const { colorize } = require("../../../utils/colorLogger");
 const con = require("../../../db/db.js");
 
-
 async function fetchLeadsPageWebhook({
   pageLimit = 2,
   authHeaders,
@@ -66,11 +65,13 @@ async function fetchLeadsPageWebhook({
 
     // 4️ Return Instantly API data (so your caller gets it)
     return response.data;
-  } catch (err) {
-    console.error("Error fetching leads batch:", err.message);
+  } catch (error) {
+    console.error("Error fetching leads batch:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext("fetchLeadsPage");
-    throw err;
+    if (setErrorContext)
+      setErrorContext(`fetchLeadsPageWebhook: ${error.message}`);
+    console.log("Error in fetchAllInterestedLeadsPage:", error.message);
+    throw error;
   } finally {
     console.log("fetchLeadsPage finished (connection remains open).");
   }
@@ -147,8 +148,8 @@ async function fetchLeadsPage({
     return response.data;
   } catch (error) {
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
-    console.error("Error in fetchAllInterestedLeadsPage:", error.message);
+    if (setErrorContext) setErrorContext(`fetchLeadsPage: ${error.message}`);
+    console.log("Error in fetchAllInterestedLeadsPage:", error.message);
     throw error;
   }
 }
@@ -164,5 +165,5 @@ function getNextCursor(apiResponse) {
 module.exports = {
   fetchLeadsPage,
   getNextCursor,
-  fetchLeadsPageWebhook
+  fetchLeadsPageWebhook,
 };

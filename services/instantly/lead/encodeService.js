@@ -173,9 +173,8 @@ async function encodeToSheet(
 ) {
   const { sheets } = await initGoogleClients();
 
-  // =========================
+
   // STEP 1: Access sheet or fallback
-  // =========================
   const metaData = await getSheetMetadata(sheets, spreadsheetId, sheetName);
   if (!metaData) {
     console.log(`[fallback] Proceeding directly to database encoding...`);
@@ -191,9 +190,7 @@ async function encodeToSheet(
     return { success: false, reason: "sheet-inaccessible-fallback" };
   }
 
-  // =========================
   // STEP 2: Ensure sheet & headers
-  // =========================
   const { sheetId, allValues, headers } = await ensureSheetAndHeaders(
     sheets,
     spreadsheetId,
@@ -202,15 +199,12 @@ async function encodeToSheet(
     metaData
   );
 
-  // =========================
   // STEP 3: Deduplication
-  // =========================
   const dupCheck = checkForDuplicates(allValues, headers, rowJson, sheetName);
   if (dupCheck.duplicate) return { success: false, reason: dupCheck.reason };
 
-  // =========================
+
   // STEP 4: Confirmation or auto-append
-  // =========================
   const proceed = await confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, async () => {
     await appendToLeadDatabase({
       rowJson,
@@ -225,17 +219,13 @@ async function encodeToSheet(
 
   if (!proceed) return false;
 
-  // =========================
   // STEP 5: Append row
-  // =========================
   const appendResp = await appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson);
   console.log(`Appended row to "${sheetName}"`);
 
   if (typeof addToTotalEncoded === "function") addToTotalEncoded(1);
 
-  // =========================
   // STEP 6: Post-processing
-  // =========================
   const nextRow = allValues.length + 1;
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
   await postAfterEncoding({
@@ -537,7 +527,7 @@ async function appendToLeadDatabase({
   if (!rowJson) {
     const error = new Error("Missing rowJson input.");
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
+    if (setErrorContext) setErrorContext(`appendToLeadDatabase: ${error.message}`);
     console.error(error.message);
     throw error;
   }
@@ -627,7 +617,7 @@ async function appendToLeadDatabase({
   } catch (error) {
     console.error("Error inserting lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
+    if (setErrorContext) setErrorContext(`AppendToLeadDatabase: ${error.message}`);
     throw error;
   }
 }
@@ -808,7 +798,7 @@ async function encodeLeadFromRequest({
   } catch (error) {
     console.error("Error encoding lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(error.message);
+    if (setErrorContext) setErrorContext(`encodeLeadFromRequest: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -885,6 +875,7 @@ markToBeApprovedLead = async (req, res) => {
     const query = `
       UPDATE tobeencodedleads
       SET isdone = true
+      SET is_denied = true
       WHERE id = $1
       RETURNING *;
     `;

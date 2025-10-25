@@ -68,25 +68,11 @@ class instantlyAiController {
     this.totalToBeApproved += val;
   }
 
-  stopIncodingRun = async (req, res) => {
-    try {
-      console.log("STOP INCODING RUNS INITIATED");
-      this.setErrorOccurred(true);
-      this.setErrorContext("Manually stopped by user");
-
-      responseReturn(res, 200, {
-        message: "Encoding Runs Successfuly Stopped",
-      });
-    } catch (error) {
-      console.log(error);
-      responseReturn(res, 500, {
-        message: "Stopping the Encoding runs into error",
-      });
-    }
-  };
+ 
 
   getInterestedRepliesOnly_ = async (req, res) => {
     var i = 0;
+   
 
     try {
       const { opts, sheetName } = req.body;
@@ -372,6 +358,22 @@ class instantlyAiController {
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);
+    }
+  };
+   stopIncodingRun = async (req, res) => {
+    try {
+      console.log("STOP INCODING RUNS INITIATED");
+      this.setErrorOccurred(true);
+      this.setErrorContext("Manually stopped by user");
+
+      responseReturn(res, 200, {
+        message: "Encoding Runs Successfuly Stopped",
+      });
+    } catch (error) {
+      console.log(error);
+      responseReturn(res, 500, {
+        message: "Stopping the Encoding runs into error",
+      });
     }
   };
 }

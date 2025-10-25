@@ -59,7 +59,7 @@ async function processEmailRow({
       );
 
       if (interested) {
-        // 🔹 Replace details (website) with business description if available
+        // Replace details (website) with business description if available
         if (rowJson.details && rowJson.details !== "none") {
           try {
             const descResult = await extractBusinessDescription({

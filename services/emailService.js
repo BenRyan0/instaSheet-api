@@ -1,7 +1,5 @@
 // services/emailService.js
 const axios = require("axios");
-const pLimit = require("p-limit").default;
-const { API_BASE, EMAILS_PATH } = require("../config");
 const { normalizeLeadsArray } = require("../utils/leads");
 const { countWords } = require("../utils/wordCounter");
 const { colorize } = require("../utils/colorLogger");

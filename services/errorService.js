@@ -1,6 +1,7 @@
 // services/errorService.js
 
 const { responseReturn } = require('../utils/response')
+const env = require("../env");
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -22,7 +23,7 @@ function handleError(err, res) {
   }
 
   // Include stack trace in non-production for debugging
-  if (process.env.NODE_ENV !== 'production') {
+  if (env.NODE_ENV !== 'production') {
     payload.detail = err.stack
   }
 

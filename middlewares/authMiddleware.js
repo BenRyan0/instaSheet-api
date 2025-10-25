@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-require('dotenv').config()
+const env = require("../env");
 
 module.exports.authMiddleware = (req, res, next) => {
   const { authorization } = req.headers;
@@ -18,7 +18,7 @@ module.exports.authMiddleware = (req, res, next) => {
 
 
   try {
-    const decodedToken= jwt.verify(token, process.env.SECRET)
+    const decodedToken= jwt.verify(token, env.SECRET)
     req.role = decodedToken.role;
     req.id= decodedToken.id;
     next();

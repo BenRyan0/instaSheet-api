@@ -1,4 +1,3 @@
-require("dotenv").config({ silent: true });
 const axios = require("axios");
 const redisClient = require("../../../config/redisClient.js");
 const { colorize } = require("../../../utils/colorLogger");
@@ -162,8 +161,81 @@ function getNextCursor(apiResponse) {
   return lastLead && lastLead.id ? lastLead.id : null;
 }
 
+async function fetchLeadsPageWebhook({
+  pageLimit = 2,
+  authHeaders,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  try {
+    // 1️ Get unprocessed emails
+    const { rows: emails } = await con.query(
+      `
+      SELECT id, campaign_id, email
+      FROM tobe_processed_campaign_emails
+      WHERE is_processed = FALSE
+      ORDER BY created_at DESC
+      LIMIT $1;
+    `,
+      [pageLimit]
+    );
+
+    if (emails.length === 0) {
+      console.log("No unprocessed emails found.");
+      return {
+        items: [],
+        next_starting_after: null,
+        message: "No unprocessed emails found.",
+      };
+    }
+
+    const contactList = emails.map((e) => e.email);
+    console.log(`Sending POST to Instantly API with contacts:`, contactList);
+
+    // 2️ POST request via axios
+    const response = await axios.post(
+      "https://api.instantly.ai/api/v2/leads/list",
+      {
+        contacts: contactList,
+        limit: pageLimit,
+      },
+      {
+        headers: {
+          ...authHeaders,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    // 3️ Mark emails as processed
+    const processedIds = emails.map((e) => e.id);
+    await con.query(
+      `
+      UPDATE tobe_processed_campaign_emails
+      SET is_processed = TRUE, updated_at = NOW()
+      WHERE id = ANY($1::int[]);
+    `,
+      [processedIds]
+    );
+
+    console.log(`Marked ${processedIds.length} emails as processed.`);
+
+    // 4️ Return Instantly API data (so your caller gets it)
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching leads batch:", error.message);
+    if (setErrorOccurred) setErrorOccurred(true);
+    if (setErrorContext)
+      setErrorContext(`fetchLeadsPageWebhook: ${error.message}`);
+    console.log("Error in fetchAllInterestedLeadsPage:", error.message);
+    throw error;
+  } finally {
+    console.log("fetchLeadsPage finished (connection remains open).");
+  }
+}
+
 module.exports = {
   fetchLeadsPage,
   getNextCursor,
-  fetchLeadsPageWebhook,
+  fetchLeadsPageWebhook
 };

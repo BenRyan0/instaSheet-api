@@ -1,4 +1,4 @@
-require("dotenv").config({ silent: true });
+const env = require("../env");
 const axios = require("axios");
 const cheerio = require('cheerio');
 
@@ -93,60 +93,10 @@ async function extractReply({
   }
 }
 
-// async function extractBusinessDescription({
-//   websiteUrl,
-//   serpApiKey = process.env.SERPAPI_KEY,
-//   setErrorOccurred,
-//   setErrorContext,
-// }) {
-//   try {
-//     if (!websiteUrl) throw new Error("Website URL is required");
-//     if (!serpApiKey) throw new Error("SerpApi API key missing");
 
-//     const serpApiUrl = "https://serpapi.com/search.json";
-//     const query = `site:${websiteUrl}`;
-
-//     const { data } = await axios.get(serpApiUrl, {
-//       params: { q: query, api_key: serpApiKey, num: 1, hl: "en" },
-//       timeout: 60000,
-//     });
-
-//     const description =
-//       data?.knowledge_graph?.description ||
-//       data?.organic_results?.[0]?.snippet ||
-//       data?.organic_results?.[0]?.rich_snippet?.top?.extensions?.join(" ") ||
-//       "none";
-
-//     setErrorOccurred?.(false);
-//     return { description };
-//   } catch (err) {
-//     const status = err.response?.status;
-//     const message =
-//       err.response?.data?.error ||
-//       err.message ||
-//       "Unknown error contacting SerpApi.";
-
-//     if (status === 503) {
-//       console.warn("SerpApi temporarily unavailable. Retrying in 3s...");
-//       await new Promise((res) => setTimeout(res, 3000));
-
-//       // Optional retry once
-//       return extractBusinessDescription({
-//         websiteUrl,
-//         serpApiKey,
-//         setErrorOccurred,
-//         setErrorContext,
-//       });
-//     }
-
-//     setErrorOccurred?.(true);
-//     setErrorContext?.(message);
-//     return { description: "none" };
-//   }
-// }
 async function extractBusinessDescription({
   websiteUrl,
-  serpApiKey = process.env.SERPAPI_KEY,
+  serpApiKey = env.SERPAPI_KEY,
   setErrorOccurred,
   setErrorContext,
 }) {

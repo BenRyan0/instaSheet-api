@@ -1,4 +1,4 @@
-require("dotenv").config({ silent: true });
+const env = require("../../../env");
 const { colorize } = require("../../../utils/colorLogger");
 const { spawn } = require("child_process");
 const { patterns } = require("../../../Filters/addressRegexConfig.json");
@@ -24,7 +24,7 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.LOCAL_LLM, // you can swap this with any local Ollama model
+        model: env.LOCAL_LLM, // you can swap this with any local Ollama model
         messages: [
           {
             role: "system",
@@ -512,9 +512,9 @@ async function isActuallyInterested(
 
     // --- Cycle through OpenRouter keys ---
     const apiKeys = [
-      process.env.OPENROUTER_API_KEY,
-      process.env.OPENROUTER_API_KEY2,
-      process.env.OPENROUTER_API_KEY3,
+      env.OPENROUTER_API_KEY,
+      env.OPENROUTER_API_KEY2,
+      env.OPENROUTER_API_KEY3,
     ].filter(Boolean);
 
     const currentKey = apiKeys[keyIndex % apiKeys.length];
@@ -523,7 +523,7 @@ async function isActuallyInterested(
       "Content-Type": "application/json",
     };
 
-    const model = process.env.OPEN_ROUTER_MODEL2;
+    const model = env.OPEN_ROUTER_MODEL2;
 
     console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
 
@@ -638,7 +638,7 @@ async function isActuallyInterested(
 
 // --- n8n Fallback Helper ---
 async function sendToN8nWebhook(emailReply) {
-  const webhookUrl = process.env.N8N_FALLBACK_WEBHOOK;
+  const webhookUrl = env.N8N_FALLBACK_WEBHOOK;
   if (!webhookUrl) {
     console.error("Missing N8N_FALLBACK_WEBHOOK env var — skipping fallback.");
     return false;

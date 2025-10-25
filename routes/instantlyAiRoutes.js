@@ -8,7 +8,7 @@ router.post('/campaign/get-all-campaigns-replies', instantlyAiController.getInte
 router.post('/agent/start-agent-encoding', instantlyAiController.getInterestedRepliesOnly_)
 
 // Stopping the encoding run
-router.post('/agent/stop-current-run', instantlyAiController.stopIncodingRun)
+// router.post('/agent/stop-current-run', instantlyAiController.stopIncodingRun)
 
 
 

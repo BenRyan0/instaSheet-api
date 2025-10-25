@@ -1,4 +1,4 @@
-require("dotenv").config({ silent: true });
+const env = require("../../env");
 const axios = require("axios");
 const con = require("../../db/db.js");
 const FormData = require("form-data");
@@ -64,7 +64,7 @@ async function postAfterEncoding(args) {
 
   // Merge FormData headers with AuthToken header
   const headers = {
-    AuthToken: process.env.PERFEX_CRM_API_KEY,
+    AuthToken: env.PERFEX_CRM_API_KEY,
     ...(typeof form.getHeaders === "function" ? form.getHeaders() : {}),
   };
 

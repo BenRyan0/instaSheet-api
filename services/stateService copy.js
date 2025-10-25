@@ -74,80 +74,38 @@ function shouldContinue(state) {
 /**
  * Build the payload for your final response.
  */
+function summarizeState(state) {
+  return {
+    total: state.rows.length,
+    rows: state.rows,
+    pagesFetched: state.pagesFetched,
+    processedLeads: state.processedLeads,
+    distinctLeadsChecked: state.distinctLeadsChecked,
+    interestedLeadCount: state.interestedLeadCount,
+    stoppedEarly: state.stoppedEarly,
+    maxEmailsCap: state.maxEmails,
+    maxPagesCap: state.maxPages,
+    aiInterestThreshold: state.aiInterestThreshold,
+    totalEncoded: state.totalEncoded,
+    totalToBeApproved: state.totalToBeApproved,
+    errorContext: state.errorContext,
+  };
+}
 const activeRunContexts = new Map();
 
-/**
- * Create a runtime context for a specific encoding run
- * Tracks progress, error states, and metrics.
- */
 function createRunContext(runId = "default") {
   const ctx = {
     runId,
-    totalEncoded: 0,
-    totalToBeApproved: 0,
-    totalEnterestedLLM: 0,
     errorOccurred: false,
     errorContext: "",
-
-    addToTotalEncoded(val) {
-      this.totalEncoded += val;
-    },
-
-    addTotalToBeApproved(val) {
-      this.totalToBeApproved += val;
-    },
-
-    addTotalEnterestedLLM(val) {
-      this.totalEnterestedLLM += val;
-    },
-
-    setErrorOccurred(val) {
-      this.errorOccurred = val;
-    },
-
-    setErrorContext(val) {
-      this.errorContext = val;
-    },
   };
 
   activeRunContexts.set(runId, ctx);
   return ctx;
 }
 
-/**
- * Retrieve an existing run context by ID
- */
-function getRunContext(runId = "default") {
-  return activeRunContexts.get(runId);
-}
-
-/**
- * Clear a run context when finished
- */
 function clearRunContext(runId = "default") {
   activeRunContexts.delete(runId);
-}
-
-/**
- * Generate a summarized state snapshot for logging or reporting
- */
-function summarizeState(state, runCtx = {}) {
-  return {
-    total: state?.rows?.length || 0,
-    rows: state?.rows || [],
-    pagesFetched: state?.pagesFetched || 0,
-    processedLeads: state?.processedLeads || 0,
-    distinctLeadsChecked: state?.distinctLeadsChecked || 0,
-    interestedLeadCount: state?.interestedLeadCount || 0,
-    stoppedEarly: state?.stoppedEarly || false,
-    maxEmailsCap: state?.maxEmails || 0,
-    maxPagesCap: state?.maxPages || 0,
-    aiInterestThreshold: state?.aiInterestThreshold || 0,
-    totalEncoded: runCtx.totalEncoded || 0,
-    totalToBeApproved: runCtx.totalToBeApproved || 0,
-    totalEnterestedLLM: runCtx.totalEnterestedLLM || 0,
-    errorContext: runCtx.errorContext || "",
-  };
 }
 
 module.exports = {
@@ -155,7 +113,5 @@ module.exports = {
   shouldContinue,
   summarizeState,
   createRunContext,
-  getRunContext,
-  clearRunContext,
   activeRunContexts,
 };

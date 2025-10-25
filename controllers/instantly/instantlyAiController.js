@@ -1,88 +1,48 @@
 const { responseReturn } = require("../../utils/response");
-require("dotenv").config({ silent: true });
+const env = require("../../env");
 const redisClient = require("../../config/redisClient");
 const { emitProgress } = require("../../events/progressEmitter");
 const {
-  normalizeLeadsArray,
+  fetchAndNormalizeLeads,
 } = require("../../services/instantly/lead/normalizeService");
-const { mapToSheetRow } = require("../../mappers/sheetRow");
 const { getAuthHeaders } = require("../../utils/auth");
-const {
-  fetchLeadsPage,
-  getNextCursor,
-} = require("../../services/instantly/lead/fetchService");
 const {
   filterNewLeads,
   normalizeKey,
   markProcessed,
 } = require("../../services/dedupService");
-const { fetchRepliesForLead } = require("../../services/emailService");
-const { isInterestedReply } = require("../../utils/filters");
 const {
   initState,
   shouldContinue,
   summarizeState,
+  createRunContext,
+  activeRunContexts,
 } = require("../../services/stateService");
 const { handleError } = require("../../services/errorService");
 const loggerController = require(".././loggerController");
-const { processEmailRow } = require("../../services/email/emailProcessing");
+const {
+  processEmailWithRetry,
+} = require("../../services/email/emailProcessing");
+const {
+  getInterestedReplies,
+} = require("../../services/instantly/lead/replyService");
+
+
+
+
 
 class instantlyAiController {
-  // Global variables accessible from other methods
-  totalEncoded = 0;
-  totalToBeApproved = 0;
-  totalEnterestedLLM = 0;
-  errorOccurred = false;
-  errorContext = "";
-  encodingCurrentProgress = "";
-
-  // Setter for totalEncoded (overwrites)
-  setTotalEncoded(val) {
-    this.totalEncoded = val;
-  }
-  setTotalToBeApproved(val) {
-    this.totalToBeApproved = val;
-  }
-  setTotalEnterestedLLM(val) {
-    this.totalEnterestedLLM = val;
-  }
-  setErrorOccurred(val) {
-    this.errorOccurred = val;
-  }
-
-  setErrorContext(val) {
-    this.errorContext = val;
-  }
-  setEncodingCurrentProgress(val) {
-    this.encodingCurrentProgress = val;
-  }
-
-  // Increment totalEncoded by a value (additive, does not reset)
-  addToTotalEncoded(val) {
-    this.totalEncoded += val;
-  }
-  addTotalEnterestedLLM(val) {
-    this.totalEnterestedLLM += val;
-  }
-  addTotalToBeApproved(val) {
-    this.totalToBeApproved += val;
-  }
-
- 
-
   getInterestedRepliesOnly_ = async (req, res) => {
-    var i = 0;
-   
-
     try {
       const { opts, sheetName } = req.body;
-      const authHeaders = getAuthHeaders(process.env.INSTANTLY_API_KEY);
+      const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails`;
       const seenMembers = await redisClient.sMembers(dedupKey);
       const seen = new Set(seenMembers);
 
-      // State initialization - for progress tracking and logging
+      const runCtx = createRunContext();
+
       const state = initState({
         initialSeenCount: seen.size,
         maxEmails: opts.maxEmails,
@@ -90,289 +50,158 @@ class instantlyAiController {
         aiInterestThreshold: opts.aiInterestThreshold,
       });
 
-      // Progress imited (socket.io)
       emitProgress(state);
       let cursor = null;
 
-      // checking if the loop has reached its max limits
-      // Checking if error flag was set before starting main loop
-      while (shouldContinue(state) && !this.errorOccurred) {
-        state.nextPage();
-
-        // GETTING ONE PAGE OF INTERESTED LEADS(will be an array of leads)
-        const page = await fetchLeadsPage({
+      while (shouldContinue(state) && !runCtx.errorOccurred) {
+        const { leads, nextCursor } = await fetchAndNormalizeLeads({
           cursor,
-          pageLimit: opts.pageLimit,
-          aiThreshold: opts.aiInterestThreshold,
+          opts,
           authHeaders,
-          setErrorOccurred: this.setErrorOccurred.bind(this),
-          setErrorContext: this.setErrorContext.bind(this),
+          runContext: runCtx,
         });
+        cursor = nextCursor;
 
-        const leads = normalizeLeadsArray(page);
-        cursor = getNextCursor(page);
+        const newLeads = filterNewLeads(leads, seen);
+        if (!newLeads.length) continue;
 
-        const batch = filterNewLeads(leads, seen);
-        console.log(batch);
-        console.log("batch");
-
-        if (batch.length === 0) {
-          // console.log("[SKIP] Empty batch, not incrementing page count.");
-          continue;
-        }
-
-        // Only increment page when we actually have new leads
-        // state.nextPage();
-
-        // Sequentially process each lead: wait for replies and email processing before next lead
-        for (const lead of batch) {
-          const result = await fetchRepliesForLead(lead, {
-            // campaignId,
-            perLeadLimit: opts.emailsPerLead,
+        for (const lead of newLeads) {
+          const interestedEmails = await getInterestedReplies({
+            lead,
+            opts,
             authHeaders,
-            delayMs: opts.delayMs,
-            setErrorOccurred: this.setErrorOccurred.bind(this),
-            setErrorContext: this.setErrorContext.bind(this),
-            is_unread: opts.is_unread,
+            redisClient,
+            dedupKey,
+            seen,
+            runContext: runCtx,
           });
 
-          // Recognize skip or error before proceeding
-          if (result.skipped) {
-            console.log(
-              `[SKIP] Lead skipped (${result.reason}): ${lead.email}`
-            );
-            // Optionally mark as processed so it's not rechecked next run
-            const emailKey = normalizeKey(lead.email || lead.lead);
-            const key = emailKey || lead.id;
-            if (key) {
-              await markProcessed(key, redisClient, dedupKey, seen);
-            }
-            continue;
-          }
+          for (const email of interestedEmails) {
+            if (runCtx.errorOccurred) break;
 
-          if (result.error) {
-            console.warn(
-              `[ERROR] Skipping lead due to fetch error: ${lead.email}`,
-              result.error
-            );
-            continue;
-          }
-
-          const { emails } = result;
-
-          if (this.errorOccurred) break;
-          state.nextLead();
-          emitProgress(state);
-
-          // Dedup AFTER successful processing instead of before
-          const emailKey = normalizeKey(lead.email || lead.lead);
-          const key = emailKey || lead.id;
-
-          let interested = [];
-          try {
-            interested = emails.filter((e) =>
-              isInterestedReply(e, opts.aiInterestThreshold)
-            );
-          } catch (e) {
-            console.warn("Failed filtering interested emails for lead", {
-              leadEmail: lead && (lead.email || lead.lead),
-              error: e && e.message,
+            const processed = await processEmailWithRetry({
+              lead,
+              email,
+              sheetName,
+              runContext: runCtx,
             });
-            interested = [];
-          }
-
-          if (!interested.length) continue;
-
-          // —————— process each email, *waiting* for true ——————
-          for (const email of interested) {
-            if (this.errorOccurred) break;
-            if (state.totalEmailsCollected >= opts.maxEmails) {
-              state.stop();
-              break;
-            }
-            // Skip emails older than 2 weeks
-            const emailTimestamp = email?.timestamp_email
-              ? new Date(email.timestamp_email)
-              : null;
-            const now = new Date();
-            const TWO_WEEKS_MS = 30 * 24 * 60 * 60 * 1000;
-
-            if (emailTimestamp && now - emailTimestamp > TWO_WEEKS_MS) {
-              console.log(
-                `[skip] Email from ${emailTimestamp.toISOString()} is older than 2 weeks, skipping.`
-              );
-              if (key) {
-                await markProcessed(key, redisClient, dedupKey, seen);
-              }
-              continue;
-            }
-            // Per-email message-id dedup removed; rely solely on lead email/id key
-
-            // Skip very long emails (>500 words) and mark as processed to avoid future repeats
-            const emailBodyText =
-              (email && email.body && email.body.text) ||
-              (lead && lead.payload && lead.payload.text) ||
-              "";
-            const wordCount =
-              typeof emailBodyText === "string"
-                ? emailBodyText.trim().split(/\s+/).filter(Boolean).length
-                : 0;
-            if (wordCount > 500) {
-              console.log(
-                `[skip] email body too long (${wordCount} words), marking processed.`
-              );
-              if (key) {
-                await markProcessed(key, redisClient, dedupKey, seen);
-              }
-              continue;
-            }
-
-            let row;
-
-            try {
-              if (
-                !email.content_preview ||
-                email.content_preview.trim() === ""
-              ) {
-                console.log(
-                  `[skip] Missing content_preview for ${
-                    lead.email || lead.lead
-                  }`
-                );
-                // Mark as processed so it won't be retried next time
-                if (key) {
-                  await markProcessed(key, redisClient, dedupKey, seen);
-                }
-                continue;
-              }
-
-              row = await mapToSheetRow({
-                lead,
-                email,
-                setErrorOccurred: this.setErrorOccurred.bind(this),
-                setErrorContext: this.setErrorContext.bind(this),
-              });
-
-              console.log("MAP TO SHEET ROW RESULT");
-              console.log(row);
-            } catch (e) {
-              console.warn("mapToSheetRow failed", {
-                leadEmail: lead && (lead.email || lead.lead),
-                error: e && e.message,
-              });
-              // Mark as processed so we do not retry this lead/email again
-              try {
-                if (key) {
-                  await markProcessed(key, redisClient, dedupKey, seen);
-                }
-              } catch (markErr) {
-                console.warn(
-                  "Failed to mark as processed after mapToSheetRow error",
-                  markErr && markErr.message
-                );
-              }
-              continue;
-            }
-            // const row = await mapToSheetRow(lead, email);
-
-            // wait until processEmailRow returns true
-            let processed = false;
-            let attempts = 0;
-            const MAX_RETRIES = 3;
-
-            do {
-              try {
-                processed = await processEmailRow({
-                  emailRow: row,
-                  sheetName,
-                  additionalContext: {
-                    ClientID: lead.id || "N/A",
-                    Category:
-                      lead.category || lead.categories || "Uncategorized",
-                    TimeStamp:
-                      email.timestamp_email || new Date().toISOString(),
-                  },
-                  addToTotalEncoded: this.addToTotalEncoded.bind(this),
-                  setErrorOccurred: this.setErrorOccurred.bind(this),
-                  setErrorContext: this.setErrorContext.bind(this),
-                  addTotalToBeApproved: this.addTotalToBeApproved.bind(this),
-                });
-              } catch (e) {
-                console.warn("processEmailRow threw", {
-                  leadEmail: lead && (lead.email || lead.lead),
-                  error: e && e.message,
-                });
-                processed = false;
-              }
-              attempts++;
-              if (!processed && attempts < MAX_RETRIES) {
-                // optional backoff before retry
-                await new Promise((r) => setTimeout(r, 500 * attempts));
-              }
-            } while (!processed && attempts < MAX_RETRIES);
 
             if (processed) {
-              state.collect(row, true);
-              state.totalInterestedLLM = this.totalEnterestedLLM;
-              state.totalEncoded = this.totalEncoded;
-              state.totalToBeApproved = this.totalToBeApproved;
-              emitProgress(state);
-              // Mark as processed only after success
-              if (key) {
-                await markProcessed(key, redisClient, dedupKey, seen);
-              }
-            } else {
-              console.warn(
-                `Failed to process row after ${attempts} attempts:`,
-                row
-              );
+              const key = normalizeKey(lead.email || lead.lead) || lead.id;
+              if (key) await markProcessed(key, redisClient, dedupKey, seen);
             }
           }
 
-          if (state.stoppedEarly) break;
-        }
-
-        // Early exit if error flag triggered mid-loop
-        if (this.errorOccurred) {
-          console.log("ERR");
-          state.stop();
-          state.errorContext = this.errorContext;
-          state.stoppedEarly = true;
           emitProgress(state);
-          if (this.errorContext) {
-            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
-            console.log(this.errorContext);
-            console.log("!!!-------------- ERROR CONTEXT --------------!!!");
-          }
-
-          const summary = summarizeState(state);
-          await loggerController.addNewLog(summary);
-          return responseReturn(res, 500, summary);
         }
       }
-      // Normal finish
-      emitProgress(state);
+
       const summary = summarizeState(state);
       await loggerController.addNewLog(summary);
-
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);
     }
   };
-   stopIncodingRun = async (req, res) => {
+  // async getInterestedRepliesOnly_(req, res) {
+  //   try {
+  //     const { opts, sheetName } = req.body;
+  //     const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+
+  //     const dedupKey = `insta:processed_emails`;
+  //     const seenMembers = await redisClient.sMembers(dedupKey);
+  //     const seen = new Set(seenMembers);
+
+  //     const runCtx = createRunContext();
+
+  //     const state = initState({
+  //       initialSeenCount: seen.size,
+  //       maxEmails: opts.maxEmails,
+  //       maxPages: opts.maxPages,
+  //       aiInterestThreshold: opts.aiInterestThreshold,
+  //     });
+
+  //     emitProgress(state);
+  //     let cursor = null;
+
+  //     while (shouldContinue(state) && !runCtx.errorOccurred) {
+  //       const { leads, nextCursor } = await fetchAndNormalizeLeads({
+  //         cursor,
+  //         opts,
+  //         authHeaders,
+  //        runContext: runCtx
+  //       });
+  //       cursor = nextCursor;
+
+  //       const newLeads = filterNewLeads(leads, seen);
+  //       if (!newLeads.length) continue;
+
+  //       for (const lead of newLeads) {
+  //         const interestedEmails = await getInterestedReplies({
+  //           lead,
+  //           opts,
+  //           authHeaders,
+  //           redisClient,
+  //           dedupKey,
+  //           seen,
+  //           runContext: runCtx
+  //         });
+
+  //         for (const email of interestedEmails) {
+  //           if (runCtx.errorOccurred) break;
+
+  //           const processed = await processEmailWithRetry({
+  //             lead,
+  //             email,
+  //             sheetName,
+  //             runContext: runCtx
+  //           });
+
+  //           if (processed) {
+  //             const key = normalizeKey(lead.email || lead.lead) || lead.id;
+  //             if (key) await markProcessed(key, redisClient, dedupKey, seen);
+  //           }
+  //         }
+
+  //         emitProgress(state);
+  //       }
+  //     }
+
+  //     const summary = summarizeState(state);
+  //     await loggerController.addNewLog(summary);
+  //     return responseReturn(res, 200, summary);
+  //   } catch (err) {
+  //     return handleError(err, res);
+  //   }
+  // }
+
+  stopIncodingRun = async (req, res) => {
     try {
-      console.log("STOP INCODING RUNS INITIATED");
-      this.setErrorOccurred(true);
-      this.setErrorContext("Manually stopped by user");
+      console.log("STOP ENCODING RUN INITIATED");
+
+      const { runId } = req.body; // optional: identify which run to stop
+      const targetRunCtx = runId
+        ? activeRunContexts.get(runId)
+        : activeRunContexts.get("default");
+
+      if (!targetRunCtx) {
+        return responseReturn(res, 404, {
+          message: "No active encoding run found.",
+        });
+      }
+
+      targetRunCtx.errorOccurred = true;
+      targetRunCtx.errorContext = "Manually stopped by user";
 
       responseReturn(res, 200, {
-        message: "Encoding Runs Successfuly Stopped",
+        message: "Encoding run successfully stopped.",
+        runId: runId || "default",
       });
     } catch (error) {
-      console.log(error);
+      console.error("Error stopping encoding run:", error);
       responseReturn(res, 500, {
-        message: "Stopping the Encoding runs into error",
+        message: "Error stopping the encoding run.",
+        error: error.message,
       });
     }
   };

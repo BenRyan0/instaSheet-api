@@ -1,8 +1,8 @@
 const jwt = require("jsonwebtoken")
-require('dotenv').config()
+const env = require("../env");
 
 module.exports.createToken = async (data) => {
-    const token = await jwt.sign(data, process.env.JWT_SECRET,{
+    const token = await jwt.sign(data, env.JWT_SECRET,{
         expiresIn: "1d"
     });
 

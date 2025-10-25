@@ -1,12 +1,10 @@
-require("dotenv").config({ silent: true });
-const axios = require("axios");
+const env = require("../../../env");
 const { initGoogleClients } = require("../../../services/googleClient.js");
-const { google } = require("googleapis");
 const readline = require("readline");
 const con = require("../../../db/db.js");
 const { responseReturn } = require("../../../utils/response.js");
 const { postAfterEncoding } = require("../../CRM/perfexCrm");
-const FormData = require("form-data");
+
 
 async function getSheetMetadata(sheets, spreadsheetId, sheetName) {
   try {
@@ -169,7 +167,7 @@ async function encodeToSheet(
   setErrorOccurred,
   setErrorContext,
   addTotalToBeApproved,
-  autoAppend = true
+  autoAppend = false
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -663,7 +661,7 @@ async function encodeLeadFromRequest({
 
     // 2️  Construct the row data
     const rowJson = {
-      "Column 1": process.env.AGENT_NAME || "instaSheet agent x1",
+      "Column 1": env.AGENT_NAME || "instaSheet agent x1",
       "For scheduling": leadData.for_scheduling || "none",
       "sales person": leadData.sales_person || "none",
       "sales person email": leadData.sales_person_email || "none",

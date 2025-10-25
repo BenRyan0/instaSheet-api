@@ -1,4 +1,4 @@
-require("dotenv").config({ silent: true });
+const env = require("../../env");
 const { responseReturn } = require("../../utils/response");
 const { API_BASE, CAMPAIGNS_PATH,CAMPAIGNS_PAGE_SIZE } = require("../../config");
 
@@ -9,7 +9,7 @@ class campaignController {
 
     try {
       const headers = {
-        Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
+        Authorization: `Bearer ${env.INSTANTLY_API_KEY}`,
         "Content-Type": "application/json",
       };
 

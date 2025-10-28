@@ -12,25 +12,9 @@ const regexes = Object.fromEntries(
   ])
 );
 
-
 async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
   if (!addressText || addressText.trim() === "") return false;
 
-  // Clean up the input: remove 'none', 'n/a', or empty fragments
-  const cleanedText = addressText
-    .split(/\s+/)
-    .filter(
-      (part) =>
-        part &&
-        part.trim() !== "" &&
-        !["none", "n/a", "na"].includes(part.trim().toLowerCase())
-    )
-    .join(" ")
-    .trim();
-
-  if (!cleanedText) return false;
-console.log(cleanedText)
-console.log("---------- cleanedText ----------")
   try {
     console.log("Classifying address with AI (Ollama)...");
 
@@ -40,135 +24,61 @@ console.log("---------- cleanedText ----------")
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: env.LOCAL_LLM, // local Ollama model
+        model: env.LOCAL_LLM, // you can swap this with any local Ollama model
         messages: [
           {
             role: "system",
-            content: `Return only "true" or "false".
-            - Reply "true" if the input text clearly or strongly suggests a location in the **United States or Canada**.
-              - Includes U.S. states (abbreviations or full names), Canadian provinces or territories.
-              - Recognizable U.S. or Canadian cities, even without a state or country mentioned (e.g. "Lakeland", "Toronto", "Chicago").
-              - ZIP or postal code patterns (U.S. or Canadian).
-              - Mentions of "USA", "U.S.A.", "United States", or "Canada".
+            content: `Return only "true" or "false".     
+                - Reply "true" if the input text clearly describes a location in the **United States**.
+                  - Includes US states (abbreviations or full names).
+                  - Recognizable US cities or ZIP code formats.
+                  - Mentions of USA, U.S.A., United States.
+                  
+                - Reply "false" if the input is outside the United States or unclear.
 
-            - Reply "false" if the location is outside the U.S. or Canada, or cannot be confidently identified as such.
-
-            STRICT RULES:
-            - Output must be **exactly** "true" or "false" — no extra words, no punctuation, no explanation.
-            - Be lenient toward partial or minimal inputs (e.g. "Dallas", "Ottawa") and still respond "true" if they are well-known U.S. or Canadian locations.`
-,
+                Strict rule: Output must be exactly "true" or "false". No explanations, no extra text.`,
           },
           {
             role: "user",
-            content: cleanedText,
+            content: addressText,
           },
         ],
         temperature: 0,
-        num_predict: 2,
+        num_predict: 5,
         stream: false,
       }),
     });
 
     if (!response.ok) {
-      const msg = `HTTP ${response.status}: ${response.statusText}`;
-      console.error("Error asking local LLM:", msg);
-      if (setErrorOccurred) setErrorOccurred(true);
-      if (setErrorContext) setErrorContext(msg);
-      throw new Error(msg);
+      console.log("ERR ASKING LOCAL LLM");
+      console.log(response);
+      if (setErrorOccurred) setErrorOccurred(true); // Non-200
+      if (setErrorContext) setErrorContext(err.message);
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    const reply =
-      data.message?.content?.trim().toLowerCase() ||
-      data.messages?.[0]?.content?.trim().toLowerCase() ||
-      "";
 
-    console.log("AI US/Canada classification result:", reply);
+    const replyContent = data.message?.content?.trim().toLowerCase();
 
-    if (reply === "true") return true;
-    if (reply === "false") return false;
+    console.log("AI US classification result:", replyContent);
 
-    // Unexpected output fallback
-    console.warn("Unexpected AI response, falling back:", reply);
+    if (replyContent === "true") return true;
+    if (replyContent === "false") return false;
+
+    // Unexpected reply → mark error
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`Unexpected reply: ${reply}`);
-    return false;
+    if (setErrorContext) setErrorContext(replyContent);
+    console.warn("Unexpected AI response, falling back:", replyContent);
+
+    return false; // fallback
   } catch (error) {
-    console.error("Error classifying with AI:", error);
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext)
-      setErrorContext(`isUSByAI: ${error.message}`);
+    console.error("Error classifying with AI:");
+    if (setErrorOccurred) setErrorOccurred(true); // Mark error on failure
+     if (setErrorContext) setErrorContext(`isUSByAI: ${error.message}`);
     return false;
   }
 }
-
-// async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
-//   if (!addressText || addressText.trim() === "") return false;
-
-//   try {
-//     console.log("Classifying address with AI (Ollama)...");
-
-//     const response = await fetch("http://localhost:11434/api/chat", {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//       },
-//       body: JSON.stringify({
-//         model: env.LOCAL_LLM, // you can swap this with any local Ollama model
-//         messages: [
-//           {
-//             role: "system",
-//             content: `Return only "true" or "false".     
-//                 - Reply "true" if the input text clearly describes a location in the **United States**.
-//                   - Includes US states (abbreviations or full names).
-//                   - Recognizable US cities or ZIP code formats.
-//                   - Mentions of USA, U.S.A., United States.
-                  
-//                 - Reply "false" if the input is outside the United States or unclear.
-
-//                 Strict rule: Output must be exactly "true" or "false". No explanations, no extra text.`,
-//           },
-//           {
-//             role: "user",
-//             content: addressText,
-//           },
-//         ],
-//         temperature: 0,
-//         num_predict: 5,
-//         stream: false,
-//       }),
-//     });
-
-//     if (!response.ok) {
-//       console.log("ERR ASKING LOCAL LLM");
-//       console.log(response);
-//       if (setErrorOccurred) setErrorOccurred(true); // Non-200
-//       if (setErrorContext) setErrorContext(err.message);
-//       throw new Error(`HTTP ${response.status}`);
-//     }
-
-//     const data = await response.json();
-
-//     const replyContent = data.message?.content?.trim().toLowerCase();
-
-//     console.log("AI US classification result:", replyContent);
-
-//     if (replyContent === "true") return true;
-//     if (replyContent === "false") return false;
-
-//     // Unexpected reply → mark error
-//     if (setErrorOccurred) setErrorOccurred(true);
-//     if (setErrorContext) setErrorContext(replyContent);
-//     console.warn("Unexpected AI response, falling back:", replyContent);
-
-//     return false; // fallback
-//   } catch (error) {
-//     console.error("Error classifying with AI:");
-//     if (setErrorOccurred) setErrorOccurred(true); // Mark error on failure
-//      if (setErrorContext) setErrorContext(`isUSByAI: ${error.message}`);
-//     return false;
-//   }
-// }
 
 async function isAddressUsBased({
   address = "",
@@ -259,8 +169,6 @@ async function isAddressUsBased({
 
     // 8️ Last resort: call AI model if regex inconclusive
     console.log(colorize("Regex inconclusive, asking AI model ...", "yellow"));
-    console.log("------ combinedText ------")
-    console.log(combinedText)
     const aiResult = await isUSByAI({
       addressText: combinedText,
       setErrorOccurred,
@@ -378,41 +286,26 @@ function ruleBasedCheck(text) {
 
 
 
-// --- Helper: Safe Fetch with Timeout ---
-async function fetchWithTimeout(url, options, timeoutMs = 60000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    return response;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// --- Main Function: Classify Interest ---
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
   useLocal = true,
   keyIndex = 0
 ) {
-  if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
-    console.warn("Skipping empty or invalid email reply");
-    return false;
-  }
+  if (!emailReply || typeof emailReply !== "string") return false;
 
   const text = normalize(emailReply);
+  const controller = new AbortController();
+  let timeoutId;
 
   try {
-    // --- Local Fallback Shortcut ---
     if (useLocal) {
       console.warn("Using local fallback → sending to n8n webhook...");
       return await sendToN8nWebhook(emailReply);
     }
 
-    // --- API Setup ---
+    timeoutId = setTimeout(() => controller.abort(), 90000);
+
     const url = "https://openrouter.ai/api/v1/chat/completions";
     const apiKeys = [
       env.OPENROUTER_API_KEY,
@@ -420,91 +313,86 @@ async function isActuallyInterested(
       env.OPENROUTER_API_KEY3,
     ].filter(Boolean);
 
-    if (!apiKeys.length) {
-      console.error("No OpenRouter API keys available → using n8n fallback.");
-      return await sendToN8nWebhook(emailReply);
-    }
-
     const currentKey = apiKeys[keyIndex % apiKeys.length];
     const headers = {
       Authorization: `Bearer ${currentKey}`,
       "Content-Type": "application/json",
     };
     const model = env.OPEN_ROUTER_MODEL2;
+
     console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
 
-    // --- Fetch with timeout protection ---
-    const resp = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content: `
-                  You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `
+                You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
 
-                  ### OFFER CONTEXT
-                  We provide working capital or cash advances to businesses based on their gross receipts.
-                  - Credit score does not affect eligibility.
-                  - Funding can be released within 24 hours.
+                ### OFFER CONTEXT
+                We provide working capital or cash advances to businesses based on their gross receipts.
+                - Credit score does not affect eligibility.
+                - Funding can be released within 24 hours.
 
-                  ### YOUR TASK
-                  Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
+                ### YOUR TASK
+                Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
 
-                  ### CLASSIFY AS TRUE IF:
-                  - The reply shows curiosity, openness, or willingness to continue the conversation.
-                  - The sender asks for a summary, information, or clarification — even briefly.
-                  - The reply includes positive or permissive phrases such as:
-                    "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
-                    "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
-                    "Give me a call", "We need funding", "What are the terms?"
-                  - The tone is polite and allows engagement.
-                  - The sender refers you to another person handling funding or finance decisions.
+                ### CLASSIFY AS TRUE IF:
+                - The reply shows curiosity, openness, or willingness to continue the conversation.
+                - The sender asks for a summary, information, or clarification — even briefly.
+                - The reply includes positive or permissive phrases such as:
+                  "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
+                  "A brief summary is fine", "Tell me more", "Interested", "Let's talk", "Give me a call",
+                  "We need funding", "What are the terms?"
+                - The tone is polite and allows engagement, even without a direct “yes.”
+                - The sender expresses business-related funding interest (explicitly or implicitly).
+                - The sender refers you to another person who handles funding or finance decisions (e.g., "Talk to our owner", "I'll forward this to the manager") — this still counts as interest.
 
-                  ### CLASSIFY AS FALSE IF:
-                  - The reply rejects the offer: "Not interested", "No thanks", "We already got funding", "Stop emailing me".
-                  - The reply requests something unrelated (grants, jobs, donations, etc.).
-                  - The reply is automated or non-human ("Received", "Out of office", "Unsubscribe").
-                  - The reply expresses negative sentiment toward the offer.
+                ### CLASSIFY AS FALSE IF:
+                - The reply rejects or declines the offer: "Not interested", "No thanks",
+                  "We already got funding", "We’ll pass", "Stop emailing me".
+                - The reply requests something unrelated (grants, donations, employment, etc.).
+                - The reply is neutral, automated, or non-human (e.g., “Received”, “Out of office”, “Do not contact”, “Unsubscribe”).
+                - The reply expresses negative sentiment toward the offer.
 
-                  Respond strictly with one lowercase word: **true** or **false**.
-              `,
-            },
-            { role: "user", content: text },
-          ],
-          temperature: 0,
-        }),
-      },
-      60000 // 60s timeout
-    );
+                ### IMPORTANT
+                - Ignore polite sign-offs or pleasantries.
+                - Focus only on the *intent* related to the funding offer.
+                - Respond with exactly one lowercase word: **true** or **false**.`,
+          },
+          { role: "user", content: text },
+        ],
+        temperature: 0,
+      }),
+    });
 
     console.log("RESPONSE IN ISACTUALLYINTERESTED:", resp.status);
 
-    // --- Handle HTTP Errors ---
     if (!resp.ok) {
       console.error("LLM ERROR:", resp.status);
 
+      // Retry next API key if rate-limited
       if (resp.status === 429 && keyIndex < apiKeys.length - 1) {
-        const delay = 2000 * (keyIndex + 1);
-        console.warn(`Rate limited on key #${keyIndex + 1}. Retrying in ${delay / 1000}s...`);
-        await new Promise((r) => setTimeout(r, delay));
+        console.warn(`Rate limited on key #${keyIndex + 1}. Retrying...`);
         return await isActuallyInterested(emailReply, addTotalInterestedLLM, false, keyIndex + 1);
       }
 
+      // If all keys fail or other errors occur
       if (keyIndex >= apiKeys.length - 1) {
-        console.error("All API keys exhausted → using n8n fallback.");
+        console.error("All API keys exhausted → using n8n webhook fallback.");
         return await isActuallyInterested(emailReply, addTotalInterestedLLM, true);
       }
 
+      // Other HTTP errors → try next key
       console.warn(`HTTP error on key #${keyIndex + 1}. Trying next key...`);
       return await isActuallyInterested(emailReply, addTotalInterestedLLM, false, keyIndex + 1);
     }
 
-    // --- Parse Response Safely ---
     const json = await resp.json();
     const modelOut =
       json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
@@ -515,24 +403,27 @@ async function isActuallyInterested(
       (modelOut.match(/\b(true|false|yes|no|interested|not interested)\b/i) || [])[1]?.toLowerCase() ||
       "";
 
+    // --- UPDATED LOGIC HERE ---
     if (!normalizedOut) {
-      console.warn(`Unexpected LLM output on key #${keyIndex + 1}:`, modelOut);
+      console.warn(`Unexpected LLM output from key #${keyIndex + 1}:`, modelOut);
 
+      // If Key #2 (index 1) gives unexpected output → jump straight to Key #3 (index 2)
       if (keyIndex === 1 && apiKeys.length > 2) {
         console.warn("Unexpected output on Key #2 → jumping to Key #3...");
         return await isActuallyInterested(emailReply, addTotalInterestedLLM, false, 2);
       }
 
+      // Try next key if available
       if (keyIndex < apiKeys.length - 1) {
         console.warn(`Retrying with next API key (#${keyIndex + 2})...`);
         return await isActuallyInterested(emailReply, addTotalInterestedLLM, false, keyIndex + 1);
       }
 
-      console.error("All API keys exhausted → using n8n fallback.");
+      // If no more keys → fallback to local webhook
+      console.error("All API keys exhausted → using n8n webhook fallback.");
       return await isActuallyInterested(emailReply, addTotalInterestedLLM, true);
     }
 
-    // --- Final Classification ---
     if (["true", "yes", "interested"].includes(normalizedOut)) {
       console.log("Classified as: TRUE (interested)");
       if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
@@ -544,51 +435,18 @@ async function isActuallyInterested(
       return false;
     }
 
-    console.warn("Unexpected classification output:", modelOut);
+    console.warn("Unexpected secondary output:", modelOut);
   } catch (err) {
-    console.error("LLM classification error:", err.name, err.message);
-    if (err.name === "AbortError") {
-      console.warn("Request aborted due to timeout → triggering n8n fallback...");
-    }
+    console.error("LLM classification error:", err);
+    console.warn("Triggering n8n webhook fallback due to error...");
     return await sendToN8nWebhook(emailReply);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  // --- Final Fallback: Rule-Based Check ---
   const ruleResult = ruleBasedCheck(text);
   console.log(`Fallback rule-based result: ${ruleResult ? "TRUE" : "FALSE"}`);
   return ruleResult;
-}
-
-// --- n8n Fallback Helper ---
-async function sendToN8nWebhook(emailReply) {
-  const webhookUrl = env.N8N_FALLBACK_WEBHOOK;
-  if (!webhookUrl) {
-    console.error("Missing N8N_FALLBACK_WEBHOOK env var — skipping fallback.");
-    return false;
-  }
-
-  try {
-    const resp = await fetchWithTimeout(
-      webhookUrl,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailContent: emailReply }),
-      },
-      15000 // 15s timeout for local webhook
-    );
-
-    if (!resp.ok) {
-      console.error("n8n webhook failed:", resp.status);
-      return false;
-    }
-
-    console.log("n8n webhook triggered successfully.");
-    return false; // Defer classification to n8n
-  } catch (err) {
-    console.error("Error sending to n8n webhook:", err.message);
-    return false;
-  }
 }
 
 

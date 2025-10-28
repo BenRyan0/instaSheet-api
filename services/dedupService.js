@@ -1,5 +1,7 @@
 // services/dedupService.js
 
+const { colorize } = require("../utils/colorLogger")
+
 function normalizeKey(email) {
   if (!email || typeof email !== 'string') return null
   return email.toLowerCase().trim()
@@ -13,7 +15,7 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
 
   // Already in our local cache?
   if (processedSet.has(emailKey)) {
-    console.log(`[dedup] skipping, already in-memory: ${emailKey}`)
+    console.log(colorize("[dedup]", "bgLightBlue"),`skipping, already in-memory: ${emailKey}`);
     return false
   }
 
@@ -21,23 +23,22 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
   const added = await redisClient.sAdd(redisKey, emailKey)
 
   if (added === 1) {
-    console.log(`[dedup] newly added to Redis: ${emailKey}`)
+    console.log(colorize("[dedup]", "bgLightBlue"),`newly added to Redis: ${emailKey}`);
     processedSet.add(emailKey)
     return true
   } else {
-    console.log(`[dedup] already in Redis: ${emailKey}`)
+     console.log(colorize("[dedup]", "bgLightBlue"),` already in Redis: ${emailKey}`);
     // Keep in local set so subsequent checks skip it too
     processedSet.add(emailKey)
     return false
   }
 }
 function filterNewLeads(leads, processed) {
-  console.log("filterNewLeads");
   return leads.filter(lead => {
     const key = lead.email?.toLowerCase().trim();
     if (!key) return true;
     if (processed.has(key)) {
-      console.log(`[skip] already processed for email=${key}`);
+      console.log(colorize("[dedup]", "bgLightBlue"), `already processed for email=${key}`);
       return false;
     }
     return true;

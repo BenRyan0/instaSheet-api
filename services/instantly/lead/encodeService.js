@@ -4,6 +4,7 @@ const readline = require("readline");
 const con = require("../../../db/db.js");
 const { responseReturn } = require("../../../utils/response.js");
 const { postAfterEncoding } = require("../../CRM/perfexCrm");
+const { colorize } = require("../../../utils/colorLogger.js");
 
 
 async function getSheetMetadata(sheets, spreadsheetId, sheetName) {
@@ -93,13 +94,13 @@ function checkForDuplicates(allValues, headers, rowJson, sheetName) {
   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
   if (existingLeadEmails.has(newLeadEmail)) {
-    console.log(`[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`);
+    console.log(colorize("[skip]", "lightGreen"),` lead email "${newLeadEmail}" already exists in "${sheetName}"`);
     return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
   const pairKey = `${newLeadEmail}|${newEmailReply}`;
   if (existingPairs.has(pairKey)) {
-    console.log(`[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
+    console.log(colorize("[skip]", "lightGreen"),` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
     return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
@@ -167,7 +168,7 @@ async function encodeToSheet(
   setErrorOccurred,
   setErrorContext,
   addTotalToBeApproved,
-  autoAppend = false
+  autoAppend
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -237,194 +238,7 @@ async function encodeToSheet(
   return appendResp.data ? true : false;
 }
 
-// async function encodeToSheet(
-//   spreadsheetId,
-//   sheetName,
-//   rowJson,
-//   additionalContext,
-//   addToTotalEncoded,
-//   setErrorOccurred,
-//   setErrorContext,
-//   addTotalToBeApproved,
-//   autoAppend = true
-// ) {
-//   const { sheets } = await initGoogleClients();
 
-//   // Ensure tab exists and headers are in row 1
-//   const meta = await sheets.spreadsheets.get({ spreadsheetId });
-//   const existingTabs = meta.data.sheets.map((s) => s.properties.title);
-//   const targetSheet = meta.data.sheets.find(
-//     (s) => s.properties.title === sheetName
-//   );
-
-//   if (!existingTabs.includes(sheetName)) {
-//     await sheets.spreadsheets.batchUpdate({
-//       spreadsheetId,
-//       requestBody: {
-//         requests: [{ addSheet: { properties: { title: sheetName } } }],
-//       },
-//     });
-
-//     const headers = Object.keys(rowJson);
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
-
-//   // Target Shhet
-//   if (!targetSheet) {
-//     throw new Error(`Sheet "${sheetName}" not found`);
-//   }
-
-//   const sheetId = targetSheet.properties.sheetId;
-
-//   // Read all existing rows
-//   const resp = await sheets.spreadsheets.values.get({
-//     spreadsheetId,
-//     range: sheetName,
-//   });
-
-//   const allValues = resp.data.values || [];
-//   let headers = allValues[0] || [];
-//   const expectedHeaders = Object.keys(rowJson);
-
-//   if (!headers.length || headers.length !== expectedHeaders.length) {
-//     headers = expectedHeaders;
-//     await sheets.spreadsheets.values.update({
-//       spreadsheetId,
-//       range: `${sheetName}!A1`,
-//       valueInputOption: "RAW",
-//       requestBody: { values: [headers] },
-//     });
-//   }
-
-//   // Deduplication setup
-//   const leadIdx = headers.indexOf("lead email");
-//   const replyIdx = headers.indexOf("email reply");
-//   if (leadIdx === -1 || replyIdx === -1) {
-//     throw new Error(
-//       `"lead email" or "email reply" columns not found in sheet "${sheetName}"`
-//     );
-//   }
-
-//   const existingLeadEmails = new Set();
-//   const existingPairs = new Set();
-//   for (let i = 1; i < allValues.length; i++) {
-//     const row = allValues[i];
-//     const leadEmail = (row[leadIdx] || "").toLowerCase().trim();
-//     const emailReply = (row[replyIdx] || "").toLowerCase().trim();
-//     if (leadEmail) existingLeadEmails.add(leadEmail);
-//     existingPairs.add(`${leadEmail}|${emailReply}`);
-//   }
-
-//   const newLeadEmail = (rowJson["lead email"] || "").toLowerCase().trim();
-//   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
-
-//   if (existingLeadEmails.has(newLeadEmail)) {
-//     console.log(
-//       `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-//     );
-//     return { success: false, reason: "duplicate-lead-email" };
-//   }
-
-//   const pairKey = `${newLeadEmail}|${newEmailReply}`;
-//   if (existingPairs.has(pairKey)) {
-//     console.log(
-//       `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-//     );
-//     return { success: false, reason: "duplicate-lead-email" };
-//   }
-
-//   // Preview and confirm (with async timeout)
-//   console.log("TimeStamp: \n", additionalContext.TimeStamp);
-//   console.log("Row to append:\n", rowJson);
-
-//   // =========================
-//   // Skip user confirmation when autoAppend is true
-//   // =========================
-//   if (!autoAppend) {
-//     console.log("TimeStamp: \n", additionalContext.TimeStamp);
-//     console.log("Row to append:\n", rowJson);
-
-//     const rl = readline.createInterface({
-//       input: process.stdin,
-//       output: process.stdout,
-//     });
-
-//     let confirm;
-//     let fallbackTriggered = false;
-//     confirm = await Promise.race([
-//       new Promise((resolve) => {
-//         rl.question("Proceed with appending this row? (y/n): ", (ans) => {
-//           rl.close();
-//           resolve(ans.trim().toLowerCase());
-//         });
-//       }),
-//       (async () => {
-//         await new Promise((r) => setTimeout(r, 10000));
-//         rl.close();
-//         console.log(
-//           "\n No response after 10 seconds — running fallback before proceeding..."
-//         );
-//         await appendToLeadDatabase({
-//           rowJson,
-//           additionalContext,
-//           setErrorOccurred,
-//           setErrorContext,
-//           addTotalToBeApproved,
-//           spreadsheetId,
-//           sheetName,
-//         });
-//         fallbackTriggered = true;
-//         return "fallback";
-//       })(),
-//     ]);
-
-//     if (fallbackTriggered) {
-//       return false;
-//     }
-
-//     if (confirm !== "y" && confirm !== "yes") {
-//       console.log(`Skipped appending to "${sheetName}"`);
-//       return false;
-//     }
-//   } else {
-//     console.log(`[auto-append] Skipping confirmation for "${sheetName}"`);
-//   }
-
-//   // Append the row
-//   const rowValues = headers.map((h) => rowJson[h] ?? "");
-//   const appendResp = await sheets.spreadsheets.values.append({
-//     spreadsheetId,
-//     range: `${sheetName}!A:A`,
-//     valueInputOption: "RAW",
-//     insertDataOption: "INSERT_ROWS",
-//     requestBody: { values: [rowValues] },
-//   });
-
-//   console.log(`Appended row to "${sheetName}"`);
-
-//   if (typeof addToTotalEncoded === "function") {
-//     addToTotalEncoded(1);
-//   }
-
-//   const nextRow = allValues.length + 1;
-//   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
-
-//   // After successful append, run async post request before ending
-//   await postAfterEncoding({
-//     rowJson,
-//     sheetUrl,
-//     additionalContext,
-//     setErrorOccurred,
-//     setErrorContext,
-//   });
-
-//   return appendResp.data ? true : false;
-// }
 
 async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
   try {
@@ -604,9 +418,6 @@ async function appendToLeadDatabase({
     const insertedId = result.rows[0]?.id;
     console.log(`Lead inserted successfully with ID: ${insertedId}`);
 
-    //  if (typeof addTotalToBeApproved === "function") {
-    //     addTotalToBeApproved(1);
-    //   }
     addTotalToBeApproved(1);
 
     await incrementFetchedInterestedLead();
@@ -735,17 +546,13 @@ async function encodeLeadFromRequest({
     const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
     if (existingLeadEmails.has(newLeadEmail)) {
-      console.log(
-        `[skip] lead email "${newLeadEmail}" already exists in "${sheetName}"`
-      );
+      console.log(colorize("[skip]", "lightGreen"),` lead email "${newLeadEmail}" already exists in "${sheetName}"`);
       return { success: false, reason: "duplicate-lead-email" };
     }
 
     const pairKey = `${newLeadEmail}|${newEmailReply}`;
     if (existingPairs.has(pairKey)) {
-      console.log(
-        `[skip] row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
-      );
+      console.log(colorize("[skip]", "lightGreen"),` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
       return { success: false, reason: "duplicate-lead+reply" };
     }
 

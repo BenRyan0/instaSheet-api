@@ -13,6 +13,7 @@ const {
   initState,
   summarizeState,
   createRunContext,
+  shouldContinue,
 } = require("../../services/stateService");
 const {
   getInterestedReplies,
@@ -22,10 +23,11 @@ const {
 } = require("../../services/email/emailProcessing");
 const { delay } = require("../../utils/helpers");
 const loggerController = require(".././loggerController");
+const { colorize } = require("../../utils/colorLogger");
 
 class webhookController {
   // LEAD PROCESSING FROM WEB HOOK
-  async encodeInterestedRepliesByWebhook({ opts, sheetName }) {
+  async encodeInterestedRepliesByWebhook({ opts, sheetName, autoAppend,descriptionExtraction }) {
     try {
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
 
@@ -45,19 +47,21 @@ class webhookController {
 
       let emptyBatchCount = 0;
 
-      while (!runCtx.errorOccurred) {
+  
+      while (shouldContinue(state) && !runCtx.errorOccurred) {
         // Fetch & normalize leads from webhook
         const leads = await fetchAndNormalizeLeadsWebhook({
           opts,
           authHeaders,
-          runContext: runCtx,
+          runContext: runCtx
         });
 
         // Filter unseen leads
         const newLeads = filterNewLeads(leads, seen);
         if (!newLeads.length) {
           emptyBatchCount++;
-          console.log(`No new leads found (${emptyBatchCount}/3)...`);
+          console.log(colorize(`(${emptyBatchCount}/3)`, "bgLightRed"));
+          // console.log(`No new leads found (${emptyBatchCount}/3)...`);
           if (emptyBatchCount >= 3) break;
           await delay(2000);
           continue;
@@ -85,6 +89,8 @@ class webhookController {
               email,
               sheetName,
               runContext: runCtx,
+              autoAppend,
+              descriptionExtraction
             });
 
             if (processed) {

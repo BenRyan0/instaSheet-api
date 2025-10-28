@@ -27,14 +27,10 @@ const {
   getInterestedReplies,
 } = require("../../services/instantly/lead/replyService");
 
-
-
-
-
 class instantlyAiController {
   getInterestedRepliesOnly_ = async (req, res) => {
     try {
-      const { opts, sheetName } = req.body;
+      const { opts, sheetName, autoAppend } = req.body;
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
 
       const dedupKey = `insta:processed_emails`;
@@ -54,6 +50,8 @@ class instantlyAiController {
       let cursor = null;
 
       while (shouldContinue(state) && !runCtx.errorOccurred) {
+        state.nextPage();
+
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
           cursor,
           opts,
@@ -66,6 +64,7 @@ class instantlyAiController {
         if (!newLeads.length) continue;
 
         for (const lead of newLeads) {
+          state.nextLead();
           const interestedEmails = await getInterestedReplies({
             lead,
             opts,
@@ -84,6 +83,7 @@ class instantlyAiController {
               email,
               sheetName,
               runContext: runCtx,
+              autoAppend,
             });
 
             if (processed) {
@@ -103,79 +103,8 @@ class instantlyAiController {
       return handleError(err, res);
     }
   };
-  // async getInterestedRepliesOnly_(req, res) {
-  //   try {
-  //     const { opts, sheetName } = req.body;
-  //     const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
 
-  //     const dedupKey = `insta:processed_emails`;
-  //     const seenMembers = await redisClient.sMembers(dedupKey);
-  //     const seen = new Set(seenMembers);
-
-  //     const runCtx = createRunContext();
-
-  //     const state = initState({
-  //       initialSeenCount: seen.size,
-  //       maxEmails: opts.maxEmails,
-  //       maxPages: opts.maxPages,
-  //       aiInterestThreshold: opts.aiInterestThreshold,
-  //     });
-
-  //     emitProgress(state);
-  //     let cursor = null;
-
-  //     while (shouldContinue(state) && !runCtx.errorOccurred) {
-  //       const { leads, nextCursor } = await fetchAndNormalizeLeads({
-  //         cursor,
-  //         opts,
-  //         authHeaders,
-  //        runContext: runCtx
-  //       });
-  //       cursor = nextCursor;
-
-  //       const newLeads = filterNewLeads(leads, seen);
-  //       if (!newLeads.length) continue;
-
-  //       for (const lead of newLeads) {
-  //         const interestedEmails = await getInterestedReplies({
-  //           lead,
-  //           opts,
-  //           authHeaders,
-  //           redisClient,
-  //           dedupKey,
-  //           seen,
-  //           runContext: runCtx
-  //         });
-
-  //         for (const email of interestedEmails) {
-  //           if (runCtx.errorOccurred) break;
-
-  //           const processed = await processEmailWithRetry({
-  //             lead,
-  //             email,
-  //             sheetName,
-  //             runContext: runCtx
-  //           });
-
-  //           if (processed) {
-  //             const key = normalizeKey(lead.email || lead.lead) || lead.id;
-  //             if (key) await markProcessed(key, redisClient, dedupKey, seen);
-  //           }
-  //         }
-
-  //         emitProgress(state);
-  //       }
-  //     }
-
-  //     const summary = summarizeState(state);
-  //     await loggerController.addNewLog(summary);
-  //     return responseReturn(res, 200, summary);
-  //   } catch (err) {
-  //     return handleError(err, res);
-  //   }
-  // }
-
-  stopIncodingRun = async (req, res) => {
+  stopEncodingRun = async (req, res) => {
     try {
       console.log("STOP ENCODING RUN INITIATED");
 

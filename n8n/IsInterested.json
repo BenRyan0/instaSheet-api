@@ -1,5 +1,5 @@
 {
-  "name": "Chat with local LLMs using n8n and Ollama",
+  "name": "IsInterested",
   "nodes": [
     {
       "parameters": {
@@ -8,12 +8,12 @@
           "format": "json"
         }
       },
-      "id": "20be25f4-5e4e-47d1-a320-8d3d19f8d632",
+      "id": "9877132c-6c0a-4515-ba26-5fe1c46f827b",
       "name": "Ollama Chat Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "position": [
-        800,
-        608
+        -112,
+        80
       ],
       "typeVersion": 1,
       "credentials": {
@@ -26,17 +26,17 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "message",
+        "path": "interested",
         "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        640,
-        464
+        -272,
+        -64
       ],
-      "id": "a4c0c399-3bd4-41c6-8b89-0ed030e599dd",
+      "id": "0b4b4a83-7458-41d1-9589-dd2d660d2ad1",
       "name": "Webhook",
       "webhookId": "2ee5c7ba-3de9-48b2-8781-3b6a72d012b9"
     },
@@ -49,28 +49,28 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
       "position": [
-        1136,
-        416
+        224,
+        -112
       ],
-      "id": "e43dd1cb-b397-453d-a610-b3c1725dd627",
+      "id": "72e1bb38-b8f3-4a2a-b77d-a6e16748d66b",
       "name": "Respond to Webhook"
     },
     {
       "parameters": {
         "promptType": "define",
-        "text": "={\n  \"emailContent\": \"{{ $json.body.emailContent }}\",\n  \"content_preview\": \"{{ $json.body.content_preview }}\"\n}\n",
+        "text": "={\n  \"emailContent\": \"{{ $json.body.emailContent }}\"\n}\n",
         "hasOutputParser": true,
         "options": {
-          "systemMessage": "You are an expert email parsing assistant.  \nYour goal is to extract only the most recent human-written reply from an email thread.\n\nInput JSON:\n{\n  \"content_preview\": \"string\", // snippet from the start of the reply\n  \"emailContent\": \"string\"     // full email thread text\n}\n\nInstructions:\n1. Locate the section of `emailContent` where the text matches or begins with `content_preview`.\n2. Extract all lines belonging to that reply **until you reach** any of the following markers that indicate quoted or previous messages:\n   - Lines starting with \"On \", \"From:\", \"Sent:\", \"To:\", \"Subject:\", \"-----Original Message-----\"\n   - Email headers or forwarding indicators (e.g., \"Forwarded message\", \"Begin forwarded message\")\n3. Remove the following noise:\n   - Email signatures (lines starting with \"--\", \"Thanks,\", \"Best,\", \"Sincerely\", etc. followed by name or contact info)\n   - Quoted previous replies (prefixed with \">\")\n   - URLs, phone numbers, or social media links if they appear in a signature block\n   - Extra whitespace or line breaks\n4. Preserve only the actual reply message text written by the sender — not any greeting, footer, or metadata.\n\nReturn only valid JSON in this format:\n{\n  \"reply\": \"cleaned_reply_text\"\n}\n\nIf no reply is detected, return:\n{\n  \"reply\": \"\"\n}\n"
+          "systemMessage": "You are an email interest classifier.  Your task is to determine if a reply indicates genuine interest in a funding offer.\n\n**OFFER:** Working capital or cash advances based on gross receipts. Credit score irrelevant. Funding available within 24 hours.\n\n**YOUR TASK:**  Analyze the email reply and classify it as **true** (interested) or **false** (not interested). Respond *only* with the single word\n**true** or **false**.\n\n**TRUE (Interested) Indicators:**\n\n*   Explicit requests for information (e.g., \"Please send info\", \"What are the terms?\").\n*   Openness to discussion (e.g., \"Let's talk\", \"Give me a call\").\n*   Positive or permissive language (e.g., \"Yes\", \"Sure\", \"Okay\", \"Go ahead\").\n*   Referral to a decision-maker.\n*   Any indication of needing or seeking funding.\n*   Polite and encouraging tone.\n\n**FALSE (Not Interested) Indicators:**\n\n*   Explicit rejection (e.g., \"Not interested\", \"No thanks\").\n*   Requests for unrelated services (grants, jobs, donations).\n*   Automated or impersonal replies (e.g., \"Received\", \"Out of office\", \"Unsubscribe\").\n*   Negative sentiment towards the offer.\n\n**IMPORTANT:** Focus on the *intent* of the reply, not just the presence of specific words."
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 2.2,
       "position": [
-        816,
-        416
+        -96,
+        -112
       ],
-      "id": "d5914a16-9d75-4691-a094-f3a7093f0464",
+      "id": "e29beb61-c44b-4cbb-9d0f-3c4f6e2001fa",
       "name": "AI Agent"
     },
     {
@@ -81,10 +81,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        608,
-        640
+        -304,
+        112
       ],
-      "id": "6ceadbcf-942c-4fe6-81a9-4c1490762b9b",
+      "id": "cf93d9f1-ebd5-4c75-9331-2a51c7941914",
       "name": "OpenRouter Chat Model",
       "credentials": {
         "openRouterApi": {
@@ -118,11 +118,6 @@
         ]
       ]
     },
-    "Respond to Webhook": {
-      "main": [
-        []
-      ]
-    },
     "AI Agent": {
       "main": [
         [
@@ -133,22 +128,16 @@
           }
         ]
       ]
-    },
-    "OpenRouter Chat Model": {
-      "ai_languageModel": [
-        []
-      ]
     }
   },
   "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "1d48c27f-563e-4963-8af4-8572302e45cd",
+  "versionId": "cf4560b6-0159-410e-9499-53ef31f431f1",
   "meta": {
-    "templateCredsSetupCompleted": true,
     "instanceId": "0d6a795e7e8819e526ed71f884be6d8bf8391c65de93980edce108f999ae5589"
   },
-  "id": "gYChWDRVt0vyoNRV",
+  "id": "DFfnQdaIM8tIkkzA",
   "tags": []
 }

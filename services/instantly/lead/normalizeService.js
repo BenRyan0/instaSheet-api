@@ -3,6 +3,8 @@ const { fetchLeadsPage, getNextCursor, fetchLeadsPageWebhook } = require("./fetc
 const env = require("../../../env");
 
 async function normalizeRow(emailRow) {
+  console.log("EMAIL ROW")
+  console.log(emailRow)
   return {
     "Column 1": env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "",

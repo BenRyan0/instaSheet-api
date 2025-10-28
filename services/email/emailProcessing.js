@@ -24,6 +24,8 @@ async function processEmailRow({
   addToTotalEncoded,
   addTotalToBeApproved,
   addTotalEnterestedLLM,
+  autoAppend,
+  descriptionExtraction
 }) {
   console.log(colorize("Processing lead Email ...", "blue"));
   const spreadsheetId = env.SPREADSHEET_ID;
@@ -66,6 +68,7 @@ async function processEmailRow({
               websiteUrl: rowJson.details,
               setErrorOccurred,
               setErrorContext,
+              descriptionExtraction
             });
 
             if (
@@ -94,7 +97,8 @@ async function processEmailRow({
           addToTotalEncoded,
           setErrorOccurred,
           setErrorContext,
-          addTotalToBeApproved
+          addTotalToBeApproved,
+          autoAppend
         );
       }
 
@@ -118,6 +122,7 @@ async function processEmailRow({
             websiteUrl: rowJson.details,
             setErrorOccurred,
             setErrorContext,
+            descriptionExtraction
           });
 
           if (
@@ -165,6 +170,8 @@ async function processEmailWithRetry({
   sheetName,
   runContext,
   maxRetries = 3,
+  autoAppend,
+  descriptionExtraction
 }) {
   let row;
   try {
@@ -176,6 +183,12 @@ async function processEmailWithRetry({
     });
   } catch (err) {
     console.warn("mapToSheetRow failed", err.message);
+    return false;
+  }
+
+  // ✅ Skip processing if row is null, undefined, or empty
+  if (!row || (typeof row === "object" && Object.keys(row).length === 0)) {
+    console.warn("Skipping processEmailRow: empty or invalid row");
     return false;
   }
 
@@ -194,14 +207,66 @@ async function processEmailWithRetry({
         addTotalToBeApproved: runContext.addTotalToBeApproved,
         setErrorOccurred: runContext.setErrorOccurred,
         setErrorContext: runContext.setErrorContext,
+        autoAppend,
       });
+
       if (processed) break;
     } catch (err) {
       console.warn("processEmailRow error", err.message);
     }
+
     await new Promise((r) => setTimeout(r, 500 * attempts));
   }
+
   return processed;
 }
 
-module.exports = { processEmailRow,processEmailWithRetry };
+
+// async function processEmailWithRetry({
+//   lead,
+//   email,
+//   sheetName,
+//   runContext,
+//   maxRetries = 3,
+//   autoAppend,
+// }) {
+//   let row;
+//   try {
+//     row = await mapToSheetRow({
+//       lead,
+//       email,
+//       setErrorOccurred: runContext.setErrorOccurred,
+//       setErrorContext: runContext.setErrorContext,
+//     });
+//   } catch (err) {
+//     console.warn("mapToSheetRow failed", err.message);
+//     return false;
+//   }
+
+//   let processed = false;
+//   for (let attempts = 1; attempts <= maxRetries; attempts++) {
+//     try {
+//       processed = await processEmailRow({
+//         emailRow: row,
+//         sheetName,
+//         additionalContext: {
+//           ClientID: lead.id || "N/A",
+//           Category: lead.category || "Uncategorized",
+//           TimeStamp: email.timestamp_email || new Date().toISOString(),
+//         },
+//         addToTotalEncoded: runContext.addToTotalEncoded,
+//         addTotalToBeApproved: runContext.addTotalToBeApproved,
+//         setErrorOccurred: runContext.setErrorOccurred,
+//         setErrorContext: runContext.setErrorContext,
+//         autoAppend
+//       });
+//       if (processed) break;
+//     } catch (err) {
+//       console.warn("processEmailRow error", err.message);
+//     }
+//     await new Promise((r) => setTimeout(r, 500 * attempts));
+//   }
+//   return processed;
+// }
+
+module.exports = { processEmailRow, processEmailWithRetry };

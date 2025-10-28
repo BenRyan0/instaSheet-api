@@ -33,10 +33,18 @@ const init = (server, options = {}) => {
     });
 
     const webhookController = require("./controllers/instantly/webhookController");
-    // --- NEW: Listen for email trigger event ---
+   
     socket.on("new_email_added", async (payload) => {
-      console.log("Socket event received: new_email_added", payload);
+      if (socket.data.isProcessing) {
+        console.log(`Ignored new trigger for ${socket.id} — still processing.`);
+        socket.emit("processing_busy", {
+          message: "Still processing previous request",
+        });
+        return;
+      }
 
+      socket.data.isProcessing = true;
+      console.log(`Processing new_email_added for ${socket.id}`);
 
       try {
         const opts = {
@@ -52,13 +60,20 @@ const init = (server, options = {}) => {
 
         await webhookController.encodeInterestedRepliesByWebhook({
           opts,
-          sheetName: "MCA Loan1",
-          useWebhook: true,
+          sheetName: payload.sheetName || "InstaSheet_Test",
+          // sheetName: payload.sheetName || "DefaultSheet",
+          autoAppend: true,
+          // autoAppend: payload.autoAppend || true,
+          descriptionExtraction: true,
         });
 
-        console.log("encodeInterestedRepliesbyWebook finished successfully");
+        console.log(`Completed encode for ${socket.id}`);
+        socket.emit("processing_done", { message: "Completed successfully" });
       } catch (err) {
-        console.error("Error in encodeInterestedRepliesbyWebook:", err);
+        console.error(`Error during processing for ${socket.id}:`, err);
+        socket.emit("processing_error", { message: err.message });
+      } finally {
+        socket.data.isProcessing = false;
       }
     });
   });

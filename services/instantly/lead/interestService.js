@@ -13,10 +13,10 @@ const regexes = Object.fromEntries(
 );
 
 
-async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
+async function isUSByAI({ addressText, setErrorOccurred, setErrorContext, keyIndex = 0 }) {
   if (!addressText || addressText.trim() === "") return false;
 
-  // Clean up the input: remove 'none', 'n/a', or empty fragments
+  // --- Clean input ---
   const cleanedText = addressText
     .split(/\s+/)
     .filter(
@@ -29,58 +29,84 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
     .trim();
 
   if (!cleanedText) return false;
-console.log(cleanedText)
-console.log("---------- cleanedText ----------")
+  console.log("Cleaned Address Text:", cleanedText);
+  console.log("---------- cleanedText ----------");
+
   try {
-    console.log("Classifying address with AI (Ollama)...");
+    // --- OpenRouter Setup ---
+    const url = "https://openrouter.ai/api/v1/chat/completions";
+    const apiKeys = [
+      env.OPENROUTER_API_KEY3,
+      env.OPENROUTER_API_KEY2,
+      env.OPENROUTER_API_KEY,
+    ].filter(Boolean);
 
-    const response = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: env.LOCAL_LLM, // local Ollama model
-        messages: [
-          {
-            role: "system",
-            content: `Return only "true" or "false".
-            - Reply "true" if the input text clearly or strongly suggests a location in the **United States or Canada**.
-              - Includes U.S. states (abbreviations or full names), Canadian provinces or territories.
-              - Recognizable U.S. or Canadian cities, even without a state or country mentioned (e.g. "Lakeland", "Toronto", "Chicago").
-              - ZIP or postal code patterns (U.S. or Canadian).
-              - Mentions of "USA", "U.S.A.", "United States", or "Canada".
-
-            - Reply "false" if the location is outside the U.S. or Canada, or cannot be confidently identified as such.
-
-            STRICT RULES:
-            - Output must be **exactly** "true" or "false" — no extra words, no punctuation, no explanation.
-            - Be lenient toward partial or minimal inputs (e.g. "Dallas", "Ottawa") and still respond "true" if they are well-known U.S. or Canadian locations.`
-,
-          },
-          {
-            role: "user",
-            content: cleanedText,
-          },
-        ],
-        temperature: 0,
-        num_predict: 2,
-        stream: false,
-      }),
-    });
-
-    if (!response.ok) {
-      const msg = `HTTP ${response.status}: ${response.statusText}`;
-      console.error("Error asking local LLM:", msg);
+    if (!apiKeys.length) {
+      console.error("No OpenRouter API keys found.");
       if (setErrorOccurred) setErrorOccurred(true);
-      if (setErrorContext) setErrorContext(msg);
-      throw new Error(msg);
+      if (setErrorContext) setErrorContext("No OpenRouter API keys found.");
+      return false;
     }
 
-    const data = await response.json();
+    const currentKey = apiKeys[keyIndex % apiKeys.length];
+    const model = env.OPEN_ROUTER_MODEL_LOCATION || "gpt-4o-mini";
+    const headers = {
+      Authorization: `Bearer ${currentKey}`,
+      "Content-Type": "application/json",
+    };
+
+    console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
+
+    const body = JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content: `
+You are a strict location classifier.  
+Return only "true" or "false".
+
+### RULES:
+- Reply "true" if the input clearly or strongly suggests a location in the **United States or Canada**:
+  - Mentions a U.S. state or Canadian province (abbreviation or full name).
+  - Includes recognizable U.S. or Canadian cities (e.g. "Chicago", "Toronto", "Vancouver", "New York").
+  - Mentions ZIP or postal codes typical of the U.S. or Canada.
+  - Contains keywords like "USA", "U.S.A.", "United States", or "Canada".
+- Reply "false" if the input is outside these regions or unclear.
+- No explanations. Only respond with one lowercase word: "true" or "false".
+`,
+        },
+        { role: "user", content: cleanedText },
+      ],
+      temperature: 0,
+    });
+
+    // --- Make request with timeout ---
+    const resp = await fetchWithTimeout(url, { method: "POST", headers, body }, 60000);
+
+    console.log("OpenRouter Response Status:", resp.status);
+
+    // --- Handle Rate Limiting & Errors ---
+    if (!resp.ok) {
+      console.error("OpenRouter Error:", resp.status);
+
+      if (resp.status === 429 && keyIndex < apiKeys.length - 1) {
+        const delay = 2000 * (keyIndex + 1);
+        console.warn(`Rate limited on key #${keyIndex + 1}. Retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+        return await isUSByAI({ addressText, setErrorOccurred, setErrorContext, keyIndex: keyIndex + 1 });
+      }
+
+      if (setErrorOccurred) setErrorOccurred(true);
+      if (setErrorContext) setErrorContext(`HTTP ${resp.status}`);
+      return false;
+    }
+
+    // --- Parse Response ---
+    const data = await resp.json();
     const reply =
-      data.message?.content?.trim().toLowerCase() ||
-      data.messages?.[0]?.content?.trim().toLowerCase() ||
+      data.choices?.[0]?.message?.content?.trim().toLowerCase() ||
+      data.choices?.[0]?.text?.trim().toLowerCase() ||
       "";
 
     console.log("AI US/Canada classification result:", reply);
@@ -88,19 +114,18 @@ console.log("---------- cleanedText ----------")
     if (reply === "true") return true;
     if (reply === "false") return false;
 
-    // Unexpected output fallback
     console.warn("Unexpected AI response, falling back:", reply);
     if (setErrorOccurred) setErrorOccurred(true);
     if (setErrorContext) setErrorContext(`Unexpected reply: ${reply}`);
     return false;
   } catch (error) {
-    console.error("Error classifying with AI:", error);
+    console.error("Error calling OpenRouter:", error);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext)
-      setErrorContext(`isUSByAI: ${error.message}`);
+    if (setErrorContext) setErrorContext(`isUSByAI: ${error.message}`);
     return false;
   }
 }
+
 
 // async function isUSByAI({ addressText, setErrorOccurred, setErrorContext }) {
 //   if (!addressText || addressText.trim() === "") return false;
@@ -395,7 +420,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
 async function isActuallyInterested(
   emailReply,
   addTotalInterestedLLM,
-  useLocal = true,
+  useLocal = false,
   keyIndex = 0
 ) {
   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {

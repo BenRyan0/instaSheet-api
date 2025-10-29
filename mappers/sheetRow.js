@@ -4,17 +4,7 @@ const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
 const env = require("../env");
 
-// Helper: Check if email body is valid
-// function validateEmailBody(emailBodyText) {
-//   if (!emailBodyText || typeof emailBodyText !== "string" || !emailBodyText.trim()) {
-//     throw new Error("Empty email content; skipping extraction");
-//   }
 
-//   const wordCount = emailBodyText.trim().split(/\s+/).filter(Boolean).length;
-//   if (wordCount > 500) {
-//     throw new Error("Email body exceeds 500 words; skipping extraction");
-//   }
-// }
 // Helper: Check if email body is valid
 function validateEmailBody(emailBodyText) {
   if (

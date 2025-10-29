@@ -27,88 +27,200 @@ const { colorize } = require("../../utils/colorLogger");
 
 class webhookController {
   // LEAD PROCESSING FROM WEB HOOK
-  async encodeInterestedRepliesByWebhook({ opts, sheetName, autoAppend,descriptionExtraction }) {
-    try {
-      const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+  // async encodeInterestedRepliesByWebhook({ opts, sheetName, autoAppend,descriptionExtraction }) {
+  //   try {
+  //     const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
 
-      // Initialize Redis de-duplication
-      const dedupKey = `insta:processed_emails`;
-      const seenMembers = await redisClient.sMembers(dedupKey);
-      const seen = new Set(seenMembers);
+  //     // Initialize Redis de-duplication
+  //     const dedupKey = `insta:processed_emails`;
+  //     const seenMembers = await redisClient.sMembers(dedupKey);
+  //     const seen = new Set(seenMembers);
 
-      // Context and state
-      const runCtx = createRunContext();
-      const state = initState({
-        initialSeenCount: seen.size,
-        maxEmails: opts.maxEmails,
-        maxPages: opts.maxPages,
-        aiInterestThreshold: opts.aiInterestThreshold,
-      });
+  //     // Context and state
+  //     const runCtx = createRunContext();
+  //     const state = initState({
+  //       initialSeenCount: seen.size,
+  //       maxEmails: opts.maxEmails,
+  //       maxPages: opts.maxPages,
+  //       aiInterestThreshold: opts.aiInterestThreshold,
+  //     });
 
-      let emptyBatchCount = 0;
+  //     let errorBatchCount = 0;
 
   
-      while (shouldContinue(state) && !runCtx.errorOccurred) {
-        // Fetch & normalize leads from webhook
-        const leads = await fetchAndNormalizeLeadsWebhook({
+  //     while (shouldContinue(state) && !runCtx.errorOccurred) {
+  //       // Fetch & normalize leads from webhook
+  //       const leads = await fetchAndNormalizeLeadsWebhook({
+  //         opts,
+  //         authHeaders,
+  //         runContext: runCtx
+  //       });
+
+  //       console.log(leads)
+  //       console.log("leads")
+
+      
+  //       const spreadsheetId = env.SPREADSHEET_ID
+
+  //       const {newLeads, error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
+  //       if (error) {
+  //         errorBatchCount++;
+  //         console.log(colorize(`(${errorBatchCount}/3)`, "bgLightRed"));
+  //         // console.log(`No new leads found (${emptyBatchCount}/3)...`);
+  //         if (errorBatchCount >= 3) break;
+  //         await delay(2000);
+  //         continue;
+  //       }
+  //       errorBatchCount = 0;
+
+  //       // Process each lead
+  //       for (const lead of newLeads) {
+  //         const interestedEmails = await getInterestedReplies({
+  //           lead,
+  //           opts,
+  //           authHeaders,
+  //           redisClient,
+  //           dedupKey,
+  //           seen,
+  //           runContext: runCtx,
+  //         });
+
+  //         // Process each interested email
+  //         for (const email of interestedEmails) {
+  //           if (runCtx.errorOccurred) break;
+
+  //           const processed = await processEmailWithRetry({
+  //             lead,
+  //             email,
+  //             sheetName,
+  //             runContext: runCtx,
+  //             autoAppend,
+  //             descriptionExtraction
+  //           });
+
+  //           if (processed) {
+  //             const key = normalizeKey(lead.email || lead.id);
+  //             if (key) await markProcessed(key, redisClient, dedupKey, seen);
+  //           }
+  //         }
+  //       }
+  //     }
+
+  //     const summary = summarizeState(state);
+  //     await loggerController.addNewLog(summary);
+  //     return summary;
+  //   } catch (err) {
+  //     console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);
+  //     return { error: true, message: err.message };
+  //   }
+  // }
+  async encodeInterestedRepliesByWebhook({
+  opts,
+  sheetName,
+  autoAppend,
+  descriptionExtraction
+}) {
+  try {
+    const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+
+    // Initialize Redis de-duplication
+    const dedupKey = `insta:processed_emails`;
+    const seenMembers = await redisClient.sMembers(dedupKey);
+    const seen = new Set(seenMembers);
+
+    // Context and state
+    const runCtx = createRunContext();
+    const state = initState({
+      initialSeenCount: seen.size,
+      maxEmails: opts.maxEmails,
+      maxPages: opts.maxPages,
+      aiInterestThreshold: opts.aiInterestThreshold,
+    });
+
+    let errorBatchCount = 0;
+    let noLeadsBatchCount = 0; // <-- NEW: counts consecutive empty lead fetches
+
+    while (shouldContinue(state) && !runCtx.errorOccurred) {
+      // Fetch & normalize leads from webhook
+      const leads = await fetchAndNormalizeLeadsWebhook({
+        opts,
+        authHeaders,
+        runContext: runCtx
+      });
+
+      console.log("leads", leads);
+
+      // ✅ NEW: detect empty leads 3 times in a row → stop
+      if (!leads || leads.length === 0) {
+        noLeadsBatchCount++;
+        console.log(`No unprocessed emails found. (${noLeadsBatchCount}/3)`);
+
+        if (noLeadsBatchCount >= 3) {
+          console.log("Stopping loop after 3 consecutive empty batches.");
+          break;
+        }
+
+        await delay(2000); // small wait before retrying
+        continue; // skip rest of the loop
+      } else {
+        // Reset the counter once we successfully fetch new leads
+        noLeadsBatchCount = 0;
+      }
+
+      const spreadsheetId = env.SPREADSHEET_ID;
+      const { newLeads, error } = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
+
+      if (error) {
+        errorBatchCount++;
+        console.log(colorize(`(${errorBatchCount}/3)`, "bgLightRed"));
+        if (errorBatchCount >= 3) break;
+        await delay(2000);
+        continue;
+      }
+      errorBatchCount = 0;
+
+      // Process each lead
+      for (const lead of newLeads) {
+        const interestedEmails = await getInterestedReplies({
+          lead,
           opts,
           authHeaders,
-          runContext: runCtx
+          redisClient,
+          dedupKey,
+          seen,
+          runContext: runCtx,
         });
 
-        // Filter unseen leads
-        const newLeads = filterNewLeads(leads, seen);
-        if (!newLeads.length) {
-          emptyBatchCount++;
-          console.log(colorize(`(${emptyBatchCount}/3)`, "bgLightRed"));
-          // console.log(`No new leads found (${emptyBatchCount}/3)...`);
-          if (emptyBatchCount >= 3) break;
-          await delay(2000);
-          continue;
-        }
-        emptyBatchCount = 0;
+        // Process each interested email
+        for (const email of interestedEmails) {
+          if (runCtx.errorOccurred) break;
 
-        // Process each lead
-        for (const lead of newLeads) {
-          const interestedEmails = await getInterestedReplies({
+          const processed = await processEmailWithRetry({
             lead,
-            opts,
-            authHeaders,
-            redisClient,
-            dedupKey,
-            seen,
+            email,
+            sheetName,
             runContext: runCtx,
+            autoAppend,
+            descriptionExtraction
           });
 
-          // Process each interested email
-          for (const email of interestedEmails) {
-            if (runCtx.errorOccurred) break;
-
-            const processed = await processEmailWithRetry({
-              lead,
-              email,
-              sheetName,
-              runContext: runCtx,
-              autoAppend,
-              descriptionExtraction
-            });
-
-            if (processed) {
-              const key = normalizeKey(lead.email || lead.id);
-              if (key) await markProcessed(key, redisClient, dedupKey, seen);
-            }
+          if (processed) {
+            const key = normalizeKey(lead.email || lead.id);
+            if (key) await markProcessed(key, redisClient, dedupKey, seen);
           }
         }
       }
-
-      const summary = summarizeState(state);
-      await loggerController.addNewLog(summary);
-      return summary;
-    } catch (err) {
-      console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);
-      return { error: true, message: err.message };
     }
+
+    const summary = summarizeState(state);
+    await loggerController.addNewLog(summary);
+    return summary;
+  } catch (err) {
+    console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);
+    return { error: true, message: err.message };
   }
+}
+
 }
 
 module.exports = new webhookController();

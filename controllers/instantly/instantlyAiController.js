@@ -60,7 +60,13 @@ class instantlyAiController {
         });
         cursor = nextCursor;
 
-        const newLeads = filterNewLeads(leads, seen);
+
+        const spreadsheetId = env.SPREADSHEET_ID
+
+        const {newLeads,error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
+        console.log("-------- newLeads --------")
+        console.log(newLeads)
+        // const newLeads = filterNewLeads(leads, seen);
         if (!newLeads.length) continue;
 
         for (const lead of newLeads) {

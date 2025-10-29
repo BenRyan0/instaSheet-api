@@ -238,8 +238,6 @@ async function encodeToSheet(
   return appendResp.data ? true : false;
 }
 
-
-
 async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
   try {
     const { sheets } = await initGoogleClients();

@@ -25,7 +25,7 @@ async function processEmailRow({
   addTotalToBeApproved,
   addTotalEnterestedLLM,
   autoAppend,
-  descriptionExtraction
+  descriptionExtraction,
 }) {
   console.log(colorize("Processing lead Email ...", "blue"));
   const spreadsheetId = env.SPREADSHEET_ID;
@@ -61,31 +61,51 @@ async function processEmailRow({
       );
 
       if (interested) {
+        console.log("-------- rowJson.details --------")
+        console.log(rowJson.details)
         // Replace details (website) with business description if available
         if (rowJson.details && rowJson.details !== "none") {
-          try {
-            const descResult = await extractBusinessDescription({
-              websiteUrl: rowJson.details,
-              setErrorOccurred,
-              setErrorContext,
-              descriptionExtraction
-            });
+          // Check if details looks like a valid URL
+          const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
+            rowJson.details.trim()
+          );
 
-            if (
-              descResult &&
-              typeof descResult.description === "string" &&
-              descResult.description.trim()
-            ) {
-              rowJson.details = descResult.description; // overwrite
-            } else {
+
+          if (isValidUrl) {
+            try {
+              const descResult = await extractBusinessDescription({
+                websiteUrl: rowJson.details,
+                setErrorOccurred,
+                setErrorContext,
+                descriptionExtraction,
+              });
+
+              if (
+                descResult &&
+                typeof descResult.description === "string" &&
+                descResult.description.trim()
+              ) {
+                rowJson.details = descResult.description.trim(); // overwrite with extracted description
+              } else {
+                rowJson.details = "none";
+              }
+            } catch (err) {
+              console.warn(
+                "Failed to extract business description:",
+                err.message
+              );
+              if (setErrorContext) {
+                setErrorContext(
+                  `Description extraction failed for ${rowJson.details}: ${err.message}`
+                );
+              }
               rowJson.details = "none";
             }
-          } catch (err) {
-            console.warn(
-              "Failed to extract business description:",
-              err.message
+          } else {
+            // Skip extraction if details isn't a URL
+            console.log(
+              `Skipping description extraction — not a valid URL: ${rowJson.details}`
             );
-            rowJson.details = "none";
           }
         }
 
@@ -122,7 +142,7 @@ async function processEmailRow({
             websiteUrl: rowJson.details,
             setErrorOccurred,
             setErrorContext,
-            descriptionExtraction
+            descriptionExtraction,
           });
 
           if (
@@ -171,7 +191,7 @@ async function processEmailWithRetry({
   runContext,
   maxRetries = 3,
   autoAppend,
-  descriptionExtraction
+  descriptionExtraction,
 }) {
   let row;
   try {
@@ -186,7 +206,7 @@ async function processEmailWithRetry({
     return false;
   }
 
-  // ✅ Skip processing if row is null, undefined, or empty
+  // Skip processing if row is null, undefined, or empty
   if (!row || (typeof row === "object" && Object.keys(row).length === 0)) {
     console.warn("Skipping processEmailRow: empty or invalid row");
     return false;
@@ -208,7 +228,7 @@ async function processEmailWithRetry({
         setErrorOccurred: runContext.setErrorOccurred,
         setErrorContext: runContext.setErrorContext,
         autoAppend,
-        descriptionExtraction
+        descriptionExtraction,
       });
 
       if (processed) break;
@@ -221,7 +241,6 @@ async function processEmailWithRetry({
 
   return processed;
 }
-
 
 // async function processEmailWithRetry({
 //   lead,

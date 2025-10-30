@@ -1,10 +1,11 @@
 const redis = require("redis");
 require("dotenv").config();
+const env = require('../env');
 
-const env = process.env.REDIS_ENV || "local"; // 'local' or 'cloud'
+const mode = env.REDIS_ENV || "local"; // 'local' or 'cloud'
 let redisClient;
 
-if (env === "cloud") {
+if (mode === "cloud") {
   console.log("Connecting to Redis Cloud...");
 
   redisClient = redis.createClient({
@@ -19,7 +20,7 @@ if (env === "cloud") {
   console.log("Connecting to local Redis...");
 
   redisClient = redis.createClient({
-    url: env.REDIS_URL || "redis://localhost:6379",
+    url:env.REDIS_URL || "redis://localhost:6379",
   });
 }
 
@@ -29,14 +30,14 @@ redisClient.on("error", (err) => {
 });
 
 redisClient.on("ready", () => {
-  console.log(`Redis client ready [${env}]`);
+  console.log(`Redis client ready [${env.REDIS_ENV}]`);
 });
 
 // Connect
 (async () => {
   try {
     await redisClient.connect();
-    console.log(`Connected to Redis (${env})`);
+    console.log(`Connected to Redis (${env.REDIS_ENV})`);
   } catch (err) {
     console.error("Redis Connection Failed:", err);
   }

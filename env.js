@@ -14,6 +14,16 @@ const envSchema = z.object({
   PG_DB: z.string(),
   PG_PORT: z.coerce.number(),
 
+  DB_MODE: z.string(),
+
+  SUPABASE_URL: z.string(),
+
+  SUPABASE_HOST: z.string(),
+  SUPABASE_USER: z.string(),
+  SUPABASE_PORT: z.coerce.number(),
+  SUPABASE_PASSWORD: z.string(),
+  SUPABASE_DB: z.string(),
+
   REDIS_URL: z.string(),
 
   INSTANTLY_API_BASE: z.string(),

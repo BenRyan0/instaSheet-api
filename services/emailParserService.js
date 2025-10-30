@@ -5,10 +5,8 @@ const { colorize } = require("../utils/colorLogger");
 
 function cleanEmailContent(rawEmail, maxWords = 100) {
   if (!rawEmail || typeof rawEmail !== "string") return "";
-
   // Remove everything starting from the first '>' line (and onward)
   let cleaned = rawEmail.split(/\n>/)[0];
-
   // Remove HTML tags if any
   cleaned = cleaned.replace(/<[^>]*>/g, "")
     // Collapse multiple newlines into one
@@ -17,7 +15,6 @@ function cleanEmailContent(rawEmail, maxWords = 100) {
     .replace(/\s{2,}/g, " ")
     // Trim leading/trailing spaces
     .trim();
-
   // --- limit total words ---
   const words = cleaned.split(/\s+/);
   if (words.length > maxWords) {

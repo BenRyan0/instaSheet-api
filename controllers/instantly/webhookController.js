@@ -150,7 +150,7 @@ class webhookController {
 
       console.log("leads", leads);
 
-      // ✅ NEW: detect empty leads 3 times in a row → stop
+      // NEW: detect empty leads 3 times in a row → stop
       if (!leads || leads.length === 0) {
         noLeadsBatchCount++;
         console.log(`No unprocessed emails found. (${noLeadsBatchCount}/3)`);

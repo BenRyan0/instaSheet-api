@@ -208,6 +208,7 @@ async function processEmailWithRetry({
         setErrorOccurred: runContext.setErrorOccurred,
         setErrorContext: runContext.setErrorContext,
         autoAppend,
+        descriptionExtraction
       });
 
       if (processed) break;

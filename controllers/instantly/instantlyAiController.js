@@ -67,7 +67,7 @@ class instantlyAiController {
         const {newLeads,error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
         console.log("-------- newLeads --------")
         newLeads.forEach(function(lead,i){
-          console.log(colorize(`${i}. ${lead.email}`, "blue" ))
+          console.log(colorize(`${i+1}. ${lead.email}`, "blue" ))
           console.log()
         })
         // const newLeads = filterNewLeads(leads, seen);

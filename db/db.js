@@ -1,23 +1,61 @@
 // db.js
 const { Client } = require('pg');
-const env = require("../env");
+const postgres = require('postgres');
+const env = require('../env');
 
-const con = new Client({
-  host: env.PG_HOST,
-  user: env.PG_USER,
-  port: env.PG_PORT,
-  password: env.PG_PASSWORD,
-  database: env.PG_DB
-});
+const isSupabase = env.DB_MODE === 'supabase';
 
-con.connect()
-  .then(() => console.log("PostgreSQL connected"))
-  .catch(err => console.error("Connection error", err.stack));
+let con;
 
-// Simulated release (closes connection)
-con.release = async () => {
-  await con.end();
-  console.log("PostgreSQL connection released");
-};
+if (isSupabase) {
+  // --- Using Postgres.js for Supabase connection ---
+  const connectionString = env.SUPABASE_URL || process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error('Missing SUPABASE_URL or DATABASE_URL for Supabase connection.');
+  }
+
+  const useSSL = env.SUPABASE_SSL === 'true';
+
+  const sql = postgres(connectionString, {
+    ssl: useSSL ? { rejectUnauthorized: false } : false,
+  });
+
+  console.log('Connected to Supabase PostgreSQL via postgres.js');
+
+  // Wrap Postgres.js client to act like pg.Client (for compatibility)
+  con = {
+    query: (text, params) => sql.unsafe(text, params),
+    release: async () => {
+      await sql.end({ timeout: 5 });
+      console.log('Supabase PostgreSQL connection released');
+    },
+    _clientType: 'postgres.js',
+  };
+
+} else {
+  // --- Using pg.Client for local PostgreSQL connection ---
+  const connectionConfig = {
+    host: env.PG_HOST,
+    user: env.PG_USER,
+    port: env.PG_PORT || 5432,
+    password: env.PG_PASSWORD,
+    database: env.PG_DB,
+  };
+
+  const client = new Client(connectionConfig);
+
+  client.connect()
+    .then(() => console.log('Connected to Local PostgreSQL via pg.Client'))
+    .catch(err => console.error('Connection error', err.stack));
+
+  // Simulated release (closes connection)
+  client.release = async () => {
+    await client.end();
+    console.log('Local PostgreSQL connection released');
+  };
+
+  con = client;
+}
 
 module.exports = con;

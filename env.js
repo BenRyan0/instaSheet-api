@@ -8,6 +8,11 @@ const envSchema = z.object({
   SECRET: z.string(),
   JWT_SECRET: z.string(),
 
+  REDIS_ENV : z.string(),
+  REDIS_HOST : z.string(),
+REDIS_PORT : z.coerce.number(),
+REDIS_USERNAME : z.string(),
+REDIS_PASSWORD : z.string(),
   PG_HOST: z.string(),
   PG_USER: z.string(),
   PG_PASSWORD: z.string(),

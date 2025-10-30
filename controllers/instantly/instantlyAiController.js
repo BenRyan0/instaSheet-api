@@ -26,6 +26,7 @@ const {
 const {
   getInterestedReplies,
 } = require("../../services/instantly/lead/replyService");
+const { colorize } = require("../../utils/colorLogger");
 
 class instantlyAiController {
   getInterestedRepliesOnly_ = async (req, res) => {
@@ -65,7 +66,10 @@ class instantlyAiController {
 
         const {newLeads,error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
         console.log("-------- newLeads --------")
-        console.log(newLeads)
+        newLeads.forEach(function(lead,i){
+          console.log(colorize(`${i}. ${lead.email}`, "blue" ))
+          console.log()
+        })
         // const newLeads = filterNewLeads(leads, seen);
         if (!newLeads.length) continue;
 

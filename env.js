@@ -25,6 +25,7 @@ const envSchema = z.object({
 
   OPEN_ROUTER_MODEL: z.string(),
   OPEN_ROUTER_MODEL2: z.string(),
+  OPEN_ROUTER_LOCATION_MODEL: z.string(),
   LOCAL_LLM: z.string(),
   USE_LOCAL: z.coerce.boolean(),
 

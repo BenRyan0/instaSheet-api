@@ -54,12 +54,6 @@ async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
 
       // If found in either column → email already exists → return true
       if (emailFromLeadCol === normalizedEmail || emailFromCol2 === normalizedEmail) {
-        console.log(
-          colorize("[duplicate]", "lightGreen"),
-          `Email "${normalizedEmail}" already exists in "${sheetName}" (row ${i + 1}, column: ${
-            emailFromLeadCol === normalizedEmail ? "lead email" : "column 2"
-          }).`
-        );
         return { exists: true, matchedRow: i + 1 };
       }
     }
@@ -115,6 +109,7 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
   }
 }
 
+
 async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
   const newLeads = [];
   let errorOccurred = false;
@@ -141,8 +136,11 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
       if (exists) {
         // Email already in sheet — not an error, just skip
         console.log(
-          colorize("[sheet-dup]", "bgYellow"),
-          `email=${key} already exists in sheet ${sheetName}`
+          colorize("[sheet-dup]", "lightYellow"),
+          "email=",
+          colorize(`${key}`,"lightCyan"),
+          "already exists in sheet",
+          colorize(`${sheetName}`,"green")
         );
         continue;
       } else {

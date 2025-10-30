@@ -1,41 +1,83 @@
-// const instantlyAiController = require("./controllers/instantlyAiController");
+const SOCKET_LIMITS = {
+  maxConnections: 100,
+  processingTimeout: 5 * 60 * 1000, // 5 minutes
+  heartbeatInterval: 30000,
+};
+
 let io;
-let allCustomer = [];
-let allSeller = [];
-let admin = {};
-let userSockets = {}; // Stores { userId: socketId } for notification delivery
+// Use Maps for better memory management and O(1) lookups
+const activeSockets = new Map(); // Stores socket instances with metadata
+const userSockets = new Map(); // userId to socketId mapping
 
 const init = (server, options = {}) => {
-  io = require("socket.io")(server, options);
+  io = require("socket.io")(server, {
+    ...options,
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    connectTimeout: 30000,
+    maxHttpBufferSize: 1e6, // 1MB
+  });
 
   io.on("connection", (socket) => {
+    // Check connection limit
+    if (activeSockets.size >= SOCKET_LIMITS.maxConnections) {
+      socket.emit('error', { message: 'Server connection limit reached' });
+      socket.disconnect(true);
+      return;
+    }
+
     console.log(`New socket connected: ${socket.id}`);
-    let timeChange;
-    if (timeChange) clearInterval(timeChange);
-    setInterval(() => {
+    
+    // Store socket metadata
+    const timeInterval = setInterval(() => {
       socket.emit("message", new Date());
     }, 3000);
+    
+    activeSockets.set(socket.id, {
+      socket,
+      connectedAt: Date.now(),
+      heartbeat: Date.now(),
+      intervals: new Set([timeInterval]),
+      timeouts: new Set(),
+      isProcessing: false
+    });
 
     // Handle disconnection
     socket.on("disconnect", () => {
       console.log(`Disconnected: ${socket.id}`);
-      remove(socket.id);
-      io.emit("activeSeller", allSeller);
-      io.emit("activeCustomer", allCustomer);
-
-      // Remove from userSockets
-      Object.keys(userSockets).forEach((userId) => {
-        if (userSockets[userId] === socket.id) {
-          delete userSockets[userId];
-          console.log(` Removed ${userId} from active sockets.`);
+      
+      // Clean up socket resources
+      const socketData = activeSockets.get(socket.id);
+      if (socketData) {
+        // Clear all intervals
+        for (const interval of socketData.intervals) {
+          clearInterval(interval);
         }
-      });
+        // Clear all timeouts
+        for (const timeout of socketData.timeouts) {
+          clearTimeout(timeout);
+        }
+        // Remove socket data
+        activeSockets.delete(socket.id);
+      }
+
+      // Remove from userSockets mapping
+      for (const [userId, id] of userSockets.entries()) {
+        if (id === socket.id) {
+          userSockets.delete(userId);
+          console.log(`Removed ${userId} from active sockets.`);
+          break;
+        }
+      }
     });
 
     const webhookController = require("./controllers/instantly/webhookController");
    
     socket.on("new_email_added", async (payload) => {
-      if (socket.data.isProcessing) {
+      const socketData = activeSockets.get(socket.id);
+      if (!socketData) return;
+
+      if (socketData.isProcessing) {
         console.log(`Ignored new trigger for ${socket.id} — still processing.`);
         socket.emit("processing_busy", {
           message: "Still processing previous request",
@@ -43,8 +85,18 @@ const init = (server, options = {}) => {
         return;
       }
 
-      socket.data.isProcessing = true;
+      socketData.isProcessing = true;
       console.log(`Processing new_email_added for ${socket.id}`);
+
+      // Set processing timeout
+      const processingTimeout = setTimeout(() => {
+        if (socketData.isProcessing) {
+          socketData.isProcessing = false;
+          socket.emit("processing_error", { message: "Processing timeout exceeded" });
+        }
+      }, SOCKET_LIMITS.processingTimeout);
+      
+      socketData.timeouts.add(processingTimeout);
 
       try {
         const opts = {
@@ -61,9 +113,7 @@ const init = (server, options = {}) => {
         await webhookController.encodeInterestedRepliesByWebhook({
           opts,
           sheetName: payload.sheetName || "InstaSheet_Test",
-          // sheetName: payload.sheetName || "DefaultSheet",
           autoAppend: true,
-          // autoAppend: payload.autoAppend || true,
           descriptionExtraction: true,
         });
 
@@ -73,23 +123,31 @@ const init = (server, options = {}) => {
         console.error(`Error during processing for ${socket.id}:`, err);
         socket.emit("processing_error", { message: err.message });
       } finally {
-        socket.data.isProcessing = false;
+        socketData.isProcessing = false;
+        socketData.timeouts.delete(processingTimeout);
+        clearTimeout(processingTimeout);
       }
     });
   });
   return io;
 };
 
-// Remove user by socket ID
-const remove = (socketId) => {
-  allCustomer = allCustomer.filter((c) => c.socketId !== socketId);
-  allSeller = allSeller.filter((s) => s.socketId !== socketId);
-};
-
 // Get Socket.io instance
 const getIO = () => io;
 
 // Get user socket by userId
-const getUserSocket = (userId) => userSockets[userId];
+const getUserSocket = (userId) => {
+  const socketId = userSockets.get(userId);
+  if (socketId) {
+    const socketData = activeSockets.get(socketId);
+    return socketData?.socket;
+  }
+  return null;
+};
 
-module.exports = { init, getIO, getUserSocket };
+// Associate user ID with socket
+const setUserSocket = (userId, socketId) => {
+  userSockets.set(userId, socketId);
+};
+
+module.exports = { init, getIO, getUserSocket, setUserSocket };

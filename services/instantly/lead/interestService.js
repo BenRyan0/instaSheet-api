@@ -49,7 +49,7 @@ async function isUSByAI({ addressText, setErrorOccurred, setErrorContext, keyInd
     }
 
     const currentKey = apiKeys[keyIndex % apiKeys.length];
-    const model = env.OPEN_ROUTER_MODEL_LOCATION || "gpt-4o-mini";
+    const model = env.OPEN_ROUTER_LOCATION_MODEL || "google/gemini-2.5-flash-lite";
     const headers = {
       Authorization: `Bearer ${currentKey}`,
       "Content-Type": "application/json",
@@ -455,7 +455,7 @@ async function isActuallyInterested(
       Authorization: `Bearer ${currentKey}`,
       "Content-Type": "application/json",
     };
-    const model = env.OPEN_ROUTER_MODEL2;
+    const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
     console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
 
     // --- Fetch with timeout protection ---

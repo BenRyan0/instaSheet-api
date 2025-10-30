@@ -105,6 +105,7 @@ async function extractReply({
               - Signatures starting with "--", "Thanks,", "Best,", "Regards,"
               - URLs, emails, phone numbers
               - Extra blank lines
+
             Output only a JSON object:
             { "reply": "cleaned_reply_text" }
             If nothing valid remains, output:
@@ -164,6 +165,67 @@ async function extractReply({
     return normalizeSchema({});
   }
 }
+
+
+// async function extractReply({
+//   emailContent,
+//   content_preview,
+//   setErrorOccurred,
+//   setErrorContext,
+// }) {
+//   try {
+//     console.log(colorize("EmailContent", "cyan"), emailContent);
+//     // Check if email content has fewer than 20 words — skip cleaning if so
+//     const wordCount = emailContent?.trim().split(/\s+/).length || 0;
+//     let cleanedContent = emailContent;
+
+//     if (wordCount >= 20) {
+//       cleanedContent = cleanEmailContent(emailContent, 100);
+
+//       console.log(colorize("CleanedContent", "cyan"), cleanedContent);
+//     } else {
+//       console.log(
+//         `Skipping cleanEmailContent — only ${wordCount} words detected.`
+//       );
+//     }
+
+//     // Skip if empty after cleaning
+//     if (!cleanedContent) {
+//       if (setErrorOccurred) setErrorOccurred(false);
+//       return normalizeSchema({});
+//     }
+
+//     console.log("cleanEmailContent");
+//     console.log(cleanEmailContent);
+
+//     const response = await fetch("http://localhost:5678/webhook/message", {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({
+//         emailContent: cleanedContent,
+//         content_preview: content_preview,
+//       }),
+//     });
+
+//     if (!response.ok) {
+//       const errText = await response.text().catch(() => "");
+//       console.error("extractReply non-OK response:", response.status, errText);
+//       if (setErrorOccurred) setErrorOccurred(true);
+//       return normalizeSchema({});
+//     }
+
+//     const data = await response.json().catch(() => ({}));
+//     const reply = data.reply || "";
+
+//     if (setErrorOccurred) setErrorOccurred(false);
+//     return normalizeSchema({ reply });
+//   } catch (err) {
+//     console.error("Error calling webhook:", err.message);
+//     setErrorOccurred(true);
+//     setErrorContext(err.message);
+//     return normalizeSchema({});
+//   }
+// }
 
 async function extractBusinessDescription({
   websiteUrl,

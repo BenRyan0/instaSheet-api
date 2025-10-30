@@ -113,6 +113,7 @@ async function fetchLeadsPage({
     );
 
     const leads = response.data?.items || [];
+    console.log(response.data);
 
     console.log(colorize("Fetched Leads ...", "cyan"));
     leads.forEach((lead, index) => {

@@ -23,9 +23,14 @@ if (isSupabase) {
 
   console.log('Connected to Supabase PostgreSQL via postgres.js');
 
-  // Wrap Postgres.js client to act like pg.Client (for compatibility)
   con = {
-    query: (text, params) => sql.unsafe(text, params),
+    query: async (text, params) => {
+      // Use safe query execution with postgres.js
+      // NOTE: postgres.js does not use $1, $2 syntax — we replace it for compatibility.
+      const formatted = text.replace(/\$(\d+)/g, (_, i) => `$${i}`);
+      const result = await sql.unsafe(formatted, params);
+      return { rows: result };
+    },
     release: async () => {
       await sql.end({ timeout: 5 });
       console.log('Supabase PostgreSQL connection released');
@@ -49,13 +54,21 @@ if (isSupabase) {
     .then(() => console.log('Connected to Local PostgreSQL via pg.Client'))
     .catch(err => console.error('Connection error', err.stack));
 
-  // Simulated release (closes connection)
   client.release = async () => {
     await client.end();
     console.log('Local PostgreSQL connection released');
   };
 
+  client._clientType = 'pg';
   con = client;
 }
+
+// --- 🔧 Helper function: getUnprocessedCampaignEmails ---
+/**
+ * Fetches a limited number of unprocessed campaign emails.
+ * @param {number} limit - The number of records to fetch.
+ * @returns {Promise<Array>} List of email objects { id, campaign_id, email }.
+ */
+
 
 module.exports = con;

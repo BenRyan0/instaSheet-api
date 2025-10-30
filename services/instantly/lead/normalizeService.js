@@ -32,7 +32,6 @@ async function normalizeRow(emailRow) {
     details: emailRow.details || "none",
     // details: "none",
     "Email Signature": emailRow["Email Signature"] || "none",
-    "Email Signature": "none",
     "linkedin link": "none",
     "status after the call": "none",
   };

@@ -89,47 +89,61 @@ async function extractReply({
 
     console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
 
-    // --- Updated System Prompt ---
-    const prompt = `
-      You are an email parsing assistant.
-
-      Task: Extract the **latest human reply** from an email thread, and also extract:
-      - Any phone numbers mentioned (return as a single text string).
-      - The email signature block (if present).
-
-      Rules:
-      1. Find where this content preview first appears: "\${content_preview}" (case-insensitive).
-      2. Collect all text until a line that matches any of these patterns:
-         ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
-         Begin forwarded message, -----Original Message-----
-      3. If such a marker appears on the same line, cut before it.
-      4. Split the extracted text into:
-         a) Main reply content
-         b) Signature (if detected)
-      5. The signature typically begins with:
-         - "--", "–", "—"
-         - "Thanks,", "Thank you,", "Best,", "Regards,", "Sincerely,"
-         - or includes job title, phone, email, company info, website, or "signatureImage"
-      6. Remove quoted lines (starting with ">") and collapse blank lines.
-      7. Detect all phone numbers (patterns like (xxx) xxx-xxxx, xxx-xxx-xxxx, +1 xxx xxx xxxx, etc.).
-         Combine multiple numbers into a comma-separated string.
-
-      Output only a JSON object:
-      {
-        "reply": "cleaned_reply_text_without_signature",
-        "phone_number": "comma-separated phone numbers or empty string",
-        "signature": "signature_text_or_empty_string"
-      }
-
-      If nothing valid remains:
-      {
-        "reply": "",
-        "phone_number": "",
-        "signature": ""
-      }
-    `;
-
     // --- Send to OpenRouter ---
+    const prompt = `
+        You are an email parsing assistant.
+
+        Task: Extract the **latest human reply** from an email thread, and also return any phone numbers mentioned in that reply.
+
+        Rules:
+        1. Find where this content preview first appears: "\${content_preview}" (case-insensitive).
+        2. Collect all text until a line that matches any of these patterns:
+          ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
+          Begin forwarded message, -----Original Message-----
+        3. If such a marker appears on the same line, cut before it.
+        4. Clean the extracted text by:
+          - Removing lines starting with ">"
+          - Removing likely signature sections starting with "--", "Thanks,", "Best,", "Regards,", or "Sent from my"
+          - Removing URLs and email addresses
+          - Collapsing multiple blank lines into one
+          - Trimming whitespace
+        5. Detect any phone numbers in the cleaned text (patterns like (xxx) xxx-xxxx, xxx-xxx-xxxx, +1 xxx xxx xxxx, etc.).
+
+        Output only a JSON object:
+        {
+          "reply": "cleaned_reply_text",
+          "phone_numbers": ["number1", "number2", ...]
+        }
+
+        If nothing valid remains:
+        {
+          "reply": "",
+          "phone_numbers": []
+        }
+`;
+
+    // const prompt = `
+    //         You are an email parsing assistant.
+
+    //         Task: Extract the **latest human reply** from an email thread.
+
+    //         Rules:
+    //         1. Find where this content preview first appears: "${content_preview}" (case-insensitive).
+    //         2. Collect all text until a line that matches any of these patterns:
+    //           ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
+    //           Begin forwarded message, -----Original Message-----
+    //         3. If such a marker appears on the same line, cut before it.
+    //         4. Remove:
+    //           - Lines starting with ">"
+    //           - Signatures starting with "--", "Thanks,", "Best,", "Regards,"
+    //           - URLs, emails, phone numbers
+    //           - Extra blank lines
+    //         Output only a JSON object:
+    //         { "reply": "cleaned_reply_text" }
+    //         If nothing valid remains, output:
+    //         { "reply": "" }
+    //         `;
+
     const body = JSON.stringify({
       model,
       messages: [
@@ -152,7 +166,9 @@ async function extractReply({
       if (resp.status === 429 && keyIndex < apiKeys.length - 1) {
         const delay = 2000 * (keyIndex + 1);
         console.warn(
-          `Rate limited on key #${keyIndex + 1}. Retrying in ${delay / 1000}s...`
+          `Rate limited on key #${keyIndex + 1}. Retrying in ${
+            delay / 1000
+          }s...`
         );
         await new Promise((r) => setTimeout(r, delay));
         return await extractReply({
@@ -177,34 +193,11 @@ async function extractReply({
     try {
       parsedReply = JSON.parse(replyRaw);
     } catch {
-      // --- Local fallback parsing if model output isn't JSON ---
-      const phoneMatches =
-        replyRaw.match(
-          /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
-        ) || [];
-      const phoneText = phoneMatches.join(", ");
-      // Try to detect signature heuristically
-      const sigMatch = replyRaw.match(
-        /(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\\s\\S]*$/i
-      );
-      const signature = sigMatch ? sigMatch[0].trim() : "";
-      const reply = sigMatch
-        ? replyRaw.replace(sigMatch[0], "").trim()
-        : replyRaw.trim();
-      parsedReply = { reply, phone_number: phoneText, signature };
+      parsedReply = { reply: replyRaw };
     }
 
-    // --- Normalize output ---
-    const reply = parsedReply.reply || "";
-    const phoneNumber =
-      typeof parsedReply.phone_number === "string"
-        ? parsedReply.phone_number
-        : (parsedReply.phone_number || []).join(", ");
-    const signature = parsedReply.signature || "";
-
     if (setErrorOccurred) setErrorOccurred(false);
-
-    return normalizeSchema({ reply, phone_number: phoneNumber, signature });
+    return normalizeSchema({ reply: parsedReply.reply || "" });
   } catch (err) {
     console.error("Error calling OpenRouter:", err.message);
     if (setErrorOccurred) setErrorOccurred(true);
@@ -213,21 +206,15 @@ async function extractReply({
   }
 }
 
-
-
-
 function normalizeSchema(obj = {}) {
-  console.log("--------------obj-----------")
-  console.log(obj)
   return {
     reply: obj.reply || "",
-    phone_numbers : obj.phone_numbers,
-    signature : obj.signature,
     senderFirstName: "",
     senderLastName: "",
     original: "",
     salesPerson: "",
-    salesPersonEmail: ""
+    salesPersonEmail: "",
+    signature: "",
   };
 }
 

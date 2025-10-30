@@ -115,7 +115,7 @@ function buildSheetRow({
     "sales person email": salesPersonEmail || "none",
     company: lead?.company_name || lead?.company || "none",
     "company phone#": lead?.phone || "none",
-    "phone#from email": phoneFromEmail || "none",
+    "phone#from email":extracted.phone_numbers || phoneFromEmail || "none",
     "lead first name": firstName || "none",
     "lead last name": lastName || "none",
     "lead email": leadEmail || "none",
@@ -124,7 +124,7 @@ function buildSheetRow({
     "phone 1": phone1 || "none",
     "#": phone1 || "none",
     phone2: phone2 || "none",
-    address: payload.street || payload.address || lead?.address || "none",
+    address: payload.street || payload.street1 || payload.address || lead?.address || "none",
     city: payload.city || lead?.city || "none",
     state: payload.state || lead?.state || payload.organization_state || "none",
     zip:
@@ -132,8 +132,8 @@ function buildSheetRow({
       payload.zip_code ||
       payload.organization_postal_code ||
       "none",
-    details: payload.details || lead?.details || lead?.website || "none",
-    "Email Signature": emailSignature || "none",
+    details: payload.description || lead?.description || lead?.business_highlight_description || lead?.website || "none",
+    "Email Signature": extracted.signature || emailSignature || "none",
     "linkedin link": "none",
     "status after the call": "none",
   };

@@ -77,6 +77,7 @@ async function postAfterEncoding(args) {
     console.log(response.data);
 
     await incrementAppendedToCRMLeads();
+    
     return response.status === 200;
   } catch (err) {
     console.error("CRM post error:", err.response?.data || err.message);

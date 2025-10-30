@@ -112,7 +112,7 @@ const init = (server, options = {}) => {
 
         await webhookController.encodeInterestedRepliesByWebhook({
           opts,
-          sheetName: payload.sheetName || "InstaSheet_Test",
+          sheetName: payload.sheetName || "MCA Loan Recent Copy",
           autoAppend: true,
           descriptionExtraction: true,
         });

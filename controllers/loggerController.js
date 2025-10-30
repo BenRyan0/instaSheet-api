@@ -42,7 +42,7 @@ class loggerController {
       ];
 
       const result = await con.query(insertQuery, values);
-      return result.rows[0].id;
+      return result
     } catch (err) {
       console.error("DB Insert Error:", err.message || err);
       throw err;

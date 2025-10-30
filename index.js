@@ -44,6 +44,7 @@ app.use("/api", require("./routes/loggerRoutes"));
 
 
 
+
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });

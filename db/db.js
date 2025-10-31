@@ -2,14 +2,16 @@
 const { Client } = require('pg');
 const postgres = require('postgres');
 const env = require('../env');
+const dns = require('dns').promises;
 
 const isSupabase = env.DB_MODE === 'supabase';
-
 let con;
 
 if (isSupabase) {
-  // --- Using Postgres.js for Supabase connection ---
-  const connectionString = env.SUPABASE_URL || process.env.DATABASE_URL;
+  // --- Using Postgres.js with Supabase Transaction Pooler ---
+  const connectionString =
+    env.SUPABASE_URL ||
+    process.env.DATABASE_URL;
 
   if (!connectionString) {
     throw new Error('Missing SUPABASE_URL or DATABASE_URL for Supabase connection.');
@@ -17,25 +19,35 @@ if (isSupabase) {
 
   const useSSL = env.SUPABASE_SSL === 'true';
 
-  const sql = postgres(connectionString, {
-    ssl: useSSL ? { rejectUnauthorized: false } : false,
-  });
+  (async () => {
+    try {
+      // Force IPv4 resolution to avoid ENETUNREACH on IPv6-only addresses
+      const url = new URL(connectionString);
+      const host = url.hostname;
+      const ipv4Addr = (await dns.lookup(host, { family: 4 })).address;
+      url.hostname = ipv4Addr;
 
-  console.log('Connected to Supabase PostgreSQL via postgres.js');
+      const sql = postgres(url.toString(), {
+        ssl: useSSL ? { rejectUnauthorized: false } : false,
+      });
 
-  con = {
-    query: async (text, params) => {
-      // postgres.js doesn't use $1 placeholders, so we keep it raw
-      const result = await sql.unsafe(text, params);
-      return { rows: result };
-    },
-    release: async () => {
-      await sql.end({ timeout: 5 });
-      console.log('Supabase PostgreSQL connection released');
-    },
-    _clientType: 'postgres.js',
-  };
+      console.log(`Connected to Supabase Transaction Pooler via postgres.js (IPv4: ${ipv4Addr})`);
 
+      con = {
+        query: async (text, params) => {
+          const result = await sql.unsafe(text, params);
+          return { rows: result };
+        },
+        release: async () => {
+          await sql.end({ timeout: 5 });
+          console.log('Supabase PostgreSQL connection released');
+        },
+        _clientType: 'postgres.js',
+      };
+    } catch (err) {
+      console.error('Supabase connection error:', err.message);
+    }
+  })();
 } else {
   // --- Using pg.Client for local PostgreSQL connection ---
   const connectionConfig = {
@@ -45,12 +57,11 @@ if (isSupabase) {
     password: env.PG_PASSWORD,
     database: env.PG_DB,
     ssl: env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    family: 4, // 👈 forces IPv4
+    family: 4, // 👈 Force IPv4 locally too
   };
 
   const client = new Client(connectionConfig);
 
-  // Use async connect to ensure stability
   (async () => {
     try {
       await client.connect();

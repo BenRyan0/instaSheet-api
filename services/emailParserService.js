@@ -48,7 +48,7 @@ async function extractReply({
 }) {
   try {
     console.log(colorize("EmailContent", "cyan"));
-    console.log(emailContent)
+    console.log(emailContent);
 
     const wordCount = emailContent?.trim().split(/\s+/).length || 0;
     let cleanedContent = emailContent;
@@ -93,7 +93,7 @@ async function extractReply({
 
     // --- Updated System Prompt ---
     const prompt = `
-      You are an email parsing assistant.
+       You are an email parsing assistant.
 
       Task: Extract the **latest human reply** from an email thread, and also extract:
       - Any phone numbers mentioned (return as a single text string).
@@ -154,7 +154,9 @@ async function extractReply({
       if (resp.status === 429 && keyIndex < apiKeys.length - 1) {
         const delay = 2000 * (keyIndex + 1);
         console.warn(
-          `Rate limited on key #${keyIndex + 1}. Retrying in ${delay / 1000}s...`
+          `Rate limited on key #${keyIndex + 1}. Retrying in ${
+            delay / 1000
+          }s...`
         );
         await new Promise((r) => setTimeout(r, delay));
         return await extractReply({
@@ -181,9 +183,8 @@ async function extractReply({
     } catch {
       // --- Local fallback parsing if model output isn't JSON ---
       const phoneMatches =
-        replyRaw.match(
-          /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
-        ) || [];
+        replyRaw.match(/\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) ||
+        [];
       const phoneText = phoneMatches.join(", ");
       // Try to detect signature heuristically
       const sigMatch = replyRaw.match(
@@ -215,21 +216,18 @@ async function extractReply({
   }
 }
 
-
-
-
 function normalizeSchema(obj = {}) {
-  console.log(colorize("Extracted Data","cyan"))
-  console.log(obj)
+  console.log(colorize("Extracted Data", "cyan"));
+  console.log(obj);
   return {
     reply: obj.reply || "",
-    phone_numbers : obj.phone_numbers,
-    signature : obj.signature,
+    phone_numbers: obj.phone_numbers,
+    signature: obj.signature,
     senderFirstName: "",
     senderLastName: "",
     original: "",
     salesPerson: "",
-    salesPersonEmail: ""
+    salesPersonEmail: "",
   };
 }
 
@@ -337,7 +335,5 @@ async function scrapeWebsite(targetUrl, apiKey, postParams = {}) {
     throw error;
   }
 }
-
-
 
 module.exports = { extractReply, extractBusinessDescription, scrapeWebsite };

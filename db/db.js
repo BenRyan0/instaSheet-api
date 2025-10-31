@@ -19,15 +19,13 @@ if (isSupabase) {
 
   const sql = postgres(connectionString, {
     ssl: useSSL ? { rejectUnauthorized: false } : false,
-    // 👇 Optional: helps avoid IPv6 issues when connecting to Supabase
-    hostname: env.SUPABASE_HOST || undefined,
   });
 
   console.log('Connected to Supabase PostgreSQL via postgres.js');
 
   con = {
     query: async (text, params) => {
-      // postgres.js doesn’t use $1 placeholders, but unsafe() handles raw SQL fine
+      // postgres.js doesn't use $1 placeholders, so we keep it raw
       const result = await sql.unsafe(text, params);
       return { rows: result };
     },
@@ -52,9 +50,15 @@ if (isSupabase) {
 
   const client = new Client(connectionConfig);
 
-  await client.connect() // 👈 Should await connection
-    .then(() => console.log('Connected to Local PostgreSQL via pg.Client'))
-    .catch(err => console.error('Connection error', err.stack));
+  // Use async connect to ensure stability
+  (async () => {
+    try {
+      await client.connect();
+      console.log('Connected to Local PostgreSQL via pg.Client');
+    } catch (err) {
+      console.error('Connection error', err.stack);
+    }
+  })();
 
   client.release = async () => {
     await client.end();

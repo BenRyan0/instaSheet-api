@@ -242,7 +242,7 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
   try {
     const { sheets } = await initGoogleClients();
 
-    // 1️⃣ Check if credentials are valid
+    // 1Check if credentials are valid
     try {
       await sheets.spreadsheets.get({
         spreadsheetId,
@@ -275,14 +275,14 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
       }
     }
 
-    // 2️⃣ Get sheet metadata again (if we reach here, credentials are fine)
+    //  Get sheet metadata again (if we reach here, credentials are fine)
     const meta = await sheets.spreadsheets.get({
       spreadsheetId,
       fields: "sheets.properties.title",
     });
     const sheetTitles = meta.data.sheets.map((s) => s.properties.title);
 
-    // 3️⃣ Check if the sheet/tab exists
+    // Check if the sheet/tab exists
     if (sheetName && !sheetTitles.includes(sheetName)) {
       return {
         status: "warning",
@@ -291,7 +291,7 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
       };
     }
 
-    // 4️⃣ Try to read data from the first row
+    // 4Try to read data from the first row
     const testRange = sheetName ? `${sheetName}!A1:A1` : "A1:A1";
     try {
       await sheets.spreadsheets.values.get({ spreadsheetId, range: testRange });
@@ -308,7 +308,7 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
       }
     }
 
-    // ✅ All checks passed
+    // All checks passed
     return {
       status: "ok",
       reason: "sheet-accessible",

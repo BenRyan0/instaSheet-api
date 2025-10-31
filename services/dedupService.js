@@ -1,18 +1,23 @@
 // services/dedupService.js
 
-const { colorize } = require("../utils/colorLogger")
+const { colorize } = require("../utils/colorLogger");
 const { initGoogleClients } = require("../services/googleClient");
-
 
 async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
   if (!email || !sheetName || !spreadsheetId) {
-    console.error(colorize("[error]", "bgRed"), "Missing required parameters for email check.");
+    console.error(
+      colorize("[error]", "bgRed"),
+      "Missing required parameters for email check."
+    );
     return { exists: false };
   }
 
   const normalizedEmail = email.toLowerCase().trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-    console.warn(colorize("[warn]", "bgYellow"), `Invalid email format: "${email}"`);
+    console.warn(
+      colorize("[warn]", "bgYellow"),
+      `Invalid email format: "${email}"`
+    );
     return { exists: false };
   }
 
@@ -49,20 +54,20 @@ async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
     for (let i = 1; i < allValues.length; i++) {
       const row = allValues[i];
 
-      const emailFromLeadCol = leadIdx !== -1 ? (row[leadIdx] || "").toLowerCase().trim() : "";
+      const emailFromLeadCol =
+        leadIdx !== -1 ? (row[leadIdx] || "").toLowerCase().trim() : "";
       const emailFromCol2 = (row[col2Idx] || "").toLowerCase().trim();
 
       // If found in either column → email already exists → return true
-      if (emailFromLeadCol === normalizedEmail || emailFromCol2 === normalizedEmail) {
+      if (
+        emailFromLeadCol === normalizedEmail ||
+        emailFromCol2 === normalizedEmail
+      ) {
         return { exists: true, matchedRow: i + 1 };
       }
     }
 
     // No match found in either column
-    console.log(
-      colorize("[ok]", "bgGreen"),
-      `Email "${normalizedEmail}" does NOT exist in "${sheetName}".`
-    );
     return { exists: false, totalRows: allValues.length };
   } catch (err) {
     console.error(
@@ -73,42 +78,46 @@ async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
   }
 }
 
-
-
 function normalizeKey(email) {
-  if (!email || typeof email !== 'string') return null
-  return email.toLowerCase().trim()
+  if (!email || typeof email !== "string") return null;
+  return email.toLowerCase().trim();
 }
 async function isProcessed(emailKey, redisClient, redisKey) {
-  if (!emailKey) return false
-  return await redisClient.sIsMember(redisKey, emailKey)
+  if (!emailKey) return false;
+  return await redisClient.sIsMember(redisKey, emailKey);
 }
 async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
-  console.log("emailKey")
-  console.log(emailKey)
-  if (!emailKey) return false
+  if (!emailKey) return false;
 
   // Already in our local cache?
   if (processedSet.has(emailKey)) {
-    // console.log(colorize("[dedup]", "bgLightBlue"),`skipping, already in-memory: ${emailKey}`);
-    return false
+    return false;
   }
 
   // Add to Redis; sAdd returns 1 if added, 0 if it was already there
-  const added = await redisClient.sAdd(redisKey, emailKey)
+  const added = await redisClient.sAdd(redisKey, emailKey);
 
   if (added === 1) {
-    console.log(colorize("[dedup]", "bgLightBlue"),`newly added to Redis: ${emailKey}`);
-    processedSet.add(emailKey)
-    return true
+    console.log(
+      colorize("[dedup]", "lightBlue"),
+      "newly added to Redis: ",
+      colorize(`${emailKey}`, "lightBlue"),
+      colorize("𝓡𝓮𝓭𝓲𝓼", "red")
+    );
+    processedSet.add(emailKey);
+    return true;
   } else {
-     console.log(colorize("[dedup]", "bgLightBlue"),` already in Redis: ${emailKey}`);
+    console.log(
+      colorize("[dedup]", "lightBlue"),
+      "already in Redis: ",
+      colorize(`${emailKey}`, "lightBlue"),
+      colorize("𝓡𝓮𝓭𝓲𝓼", "red")
+    );
     // Keep in local set so subsequent checks skip it too
-    processedSet.add(emailKey)
-    return false
+    processedSet.add(emailKey);
+    return false;
   }
 }
-
 
 async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
   const newLeads = [];
@@ -116,7 +125,6 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
 
   for (const lead of leads) {
     const key = lead.email?.toLowerCase().trim();
-    console.log("key:", key);
 
     // Skip leads with no email
     if (!key) {
@@ -126,34 +134,49 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
 
     // Skip already processed emails
     if (processed.has(key)) {
-      console.log(colorize("[dedup]", "bgLightBlue"), `already processed for email=${key}`);
+      console.log(
+        colorize("[dedup]", "lightBlue"),
+        `already processed email:`,
+        colorize(`${key}`, "lightBlue"),
+        colorize("𝓡𝓮𝓭𝓲𝓼", "red")
+      );
       continue;
     }
 
     try {
-      const { exists } = await checkLeadEmailExists(key, sheetName, spreadsheetId);
+      const { exists } = await checkLeadEmailExists(
+        key,
+        sheetName,
+        spreadsheetId
+      );
 
       if (exists) {
         // Email already in sheet — not an error, just skip
         console.log(
           colorize("[sheet-dup]", "lightYellow"),
-          "email=",
-          colorize(`${key}`,"lightCyan"),
+          "email:",
+          colorize(`${key}`, "lightCyan"),
           "already exists in sheet",
-          colorize(`${sheetName}`,"green")
+          colorize(`${sheetName}`, "green")
         );
         continue;
       } else {
         // Email not found — this is *OK*, it's a new lead
         console.log(
-          colorize("[ok]", "bgGreen"),
-          `email=${key} does NOT exist in sheet ${sheetName}`
+          colorize("[ LEAD OK ]", "green"),
+          "email=",
+          colorize(`${key}`, "lightCyan"),
+          "does NOT exist in sheet",
+          colorize(`${sheetName}`, "green")
         );
       }
-
     } catch (err) {
       // Only real exceptions are errors (e.g., API failure)
-      console.error(colorize("[error]", "bgRed"), `Error checking email=${key}:`, err.message);
+      console.error(
+        colorize("[error]", "bgRed"),
+        `Error checking email=${key}:`,
+        err.message
+      );
       errorOccurred = true;
       break; // stop the loop if a real error occurs
     }
@@ -165,11 +188,9 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
   return { newLeads, error: errorOccurred };
 }
 
-
-
 module.exports = {
   normalizeKey,
   isProcessed,
   markProcessed,
-  filterNewLeads
-}
+  filterNewLeads,
+};

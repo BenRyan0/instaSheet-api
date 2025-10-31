@@ -47,14 +47,16 @@ async function extractReply({
   keyIndex = 0,
 }) {
   try {
-    console.log(colorize("EmailContent", "cyan"), emailContent);
+    console.log(colorize("EmailContent", "cyan"));
+    console.log(emailContent)
 
     const wordCount = emailContent?.trim().split(/\s+/).length || 0;
     let cleanedContent = emailContent;
 
     if (wordCount >= 20) {
       cleanedContent = cleanEmailContent(emailContent, 100);
-      console.log(colorize("CleanedContent", "cyan"), cleanedContent);
+      console.log(colorize("CleanedContent", "cyan"));
+      console.log(cleanedContent);
     } else {
       console.log(
         `Skipping cleanEmailContent — only ${wordCount} words detected.`
@@ -217,7 +219,7 @@ async function extractReply({
 
 
 function normalizeSchema(obj = {}) {
-  console.log("--------------obj-----------")
+  console.log(colorize("Extracted Data","cyan"))
   console.log(obj)
   return {
     reply: obj.reply || "",

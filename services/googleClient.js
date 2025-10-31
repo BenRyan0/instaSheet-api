@@ -33,7 +33,8 @@ export async function initGoogleClients() {
     sheets = google.sheets({ version: "v4", auth: client });
     drive = google.drive({ version: "v3", auth: client });
 
-    console.log("Google API clients initialized successfully.");
+    // console.log(colorize("",""))
+    // console.log("Google API clients initialized successfully.");
 
     return { sheets, drive, auth };
   } catch (error) {

@@ -43,7 +43,9 @@ app.use("/api", require("./routes/instantlyAiRoutes"));
 app.use("/api", require("./routes/loggerRoutes"));
 
 
-
+app.get("/", (req, res) => {
+  res.send("You Have Reached the endpoint of instaSheet");
+});
 
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

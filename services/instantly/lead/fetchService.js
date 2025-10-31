@@ -28,7 +28,7 @@ async function fetchLeadsPageWebhook({
         items: [],
         next_starting_after: null,
         message: "No unprocessed emails found.",
-        noUnprocessed : true
+        noUnprocessed: true,
       };
     }
 
@@ -60,8 +60,12 @@ async function fetchLeadsPageWebhook({
     `,
       [processedIds]
     );
-
-    console.log(`Marked ${processedIds.length} emails as processed.`);
+console.log(
+  colorize("[ Marked as Processed Count ","green"),
+  colorize(`${processedIds.length}`,"green"),
+  colorize("]","green"),
+)
+    // console.log(`Marked ${processedIds.length} emails as processed.`);
 
     // 4️ Return Instantly API data (so your caller gets it)
     return response.data;
@@ -84,8 +88,6 @@ async function fetchLeadsPage({
   setErrorContext,
   setErrorOccurred,
 }) {
-  console.log("FetchAllInterestedLeadsPage -init");
-
   const redisCursorKey = `insta:global_cursor:${pageLimit}`;
   const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
 
@@ -94,7 +96,12 @@ async function fetchLeadsPage({
     let storedCursor = await redisClient.get(redisCursorKey);
     const effectiveCursor = storedCursor || cursor || "";
 
-    console.log(`Using global cursor (limit=${pageLimit}):`, effectiveCursor);
+    console.log(
+      colorize("[ leads GET ]", "green"),
+      "cursor ( limit =",
+      colorize(`${pageLimit}`, "green"),") => ",
+      colorize(`${effectiveCursor}`, "green")
+    );
 
     // Step 2: Build request
     const body = {
@@ -113,11 +120,10 @@ async function fetchLeadsPage({
     );
 
     const leads = response.data?.items || [];
-    console.log(response.data);
-
-    console.log(colorize("Fetched Leads ...", "cyan"));
     leads.forEach((lead, index) => {
-      console.log(colorize(`${index + 1}. ${lead.email}`, "cyan"));
+      console.log(
+        `${index + 1}. `,
+        colorize(`${lead.email}`, "cyan"));
     });
 
     // Step 4: Handle cursor logic
@@ -127,7 +133,13 @@ async function fetchLeadsPage({
       await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
       await redisClient.del(redisFailCountKey);
 
-      console.log(`Updated global Redis cursor: ${newCursor}`);
+      // console.log(`Updated global Redis cursor: ${newCursor}`);
+      console.log(
+      colorize("[ DONE ]", "green"),
+      "new cursor ( limit =",
+      colorize(`${pageLimit}`, "green"),") => ",
+      colorize(`${newCursor}`, "green")
+    );
     } else {
       console.log("No new cursor returned by API — keeping current cursor.");
 
@@ -144,7 +156,6 @@ async function fetchLeadsPage({
       }
     }
 
-    console.log("FetchAllInterestedLeadsPage END");
     return response.data;
   } catch (error) {
     if (setErrorOccurred) setErrorOccurred(true);
@@ -162,10 +173,8 @@ function getNextCursor(apiResponse) {
   return lastLead && lastLead.id ? lastLead.id : null;
 }
 
-
 module.exports = {
   fetchLeadsPage,
   getNextCursor,
   fetchLeadsPageWebhook,
 };
-

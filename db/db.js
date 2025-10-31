@@ -63,12 +63,6 @@ if (isSupabase) {
   con = client;
 }
 
-// --- 🔧 Helper function: getUnprocessedCampaignEmails ---
-/**
- * Fetches a limited number of unprocessed campaign emails.
- * @param {number} limit - The number of records to fetch.
- * @returns {Promise<Array>} List of email objects { id, campaign_id, email }.
- */
 
 
 module.exports = con;

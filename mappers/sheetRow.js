@@ -126,7 +126,7 @@ function buildSheetRow({
     phone2: phone2 || "none",
     address: payload.street || payload.street1 || payload.address || lead?.address || "none",
     city: payload.city || lead?.city || "none",
-    state: payload.state || lead?.state || payload.organization_state || "none",
+    state: payload.state || lead?.state || payload.organization_state || payload["state/region"] || "none",
     zip:
       payload.zip ||
       payload.zip_code ||
@@ -147,8 +147,8 @@ async function mapToSheetRow({
   setErrorContext,
 }) {
   try {
-    console.log(colorize("LEAD", "cyan"), lead);
-    console.log(colorize("EMAIL", "cyan"), email);
+    // console.log(colorize("LEAD", "cyan"), lead);
+    // console.log(colorize("EMAIL", "cyan"), email);
     const emailBodyText = email?.body?.text || "";
 
     // Step 1: Validate email body

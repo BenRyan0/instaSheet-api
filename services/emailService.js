@@ -23,12 +23,15 @@ async function _awaitRateLimit() {
 
 async function fetchRepliesForLead(
   lead,
-  { perLeadLimit, authHeaders, delayMs, setErrorContext,
-  setErrorOccurred }
+  { perLeadLimit, authHeaders, delayMs, setErrorContext, setErrorOccurred }
 ) {
   // Skip leads with no replies
   if (!lead.email_reply_count || lead.email_reply_count === 0) {
-    console.log(`[SKIP] No replies for lead: ${lead.email}`);
+    console.log(
+      colorize("[SKIP]", "orange"),
+      "No replies for lead:",
+      colorize(`${lead.email}`, "cyan")
+    );
     return { lead, emails: [], skipped: true, reason: "No replies" };
   }
 
@@ -37,10 +40,8 @@ async function fetchRepliesForLead(
     lead: lead.email || lead.payload?.email,
     email_type: "received",
     sort_order: "desc",
-    limit: perLeadLimit
+    limit: perLeadLimit,
   };
-
-  console.log("fetchRepliesForLead START", params);
 
   try {
     // Global rate-limit guard
@@ -52,31 +53,37 @@ async function fetchRepliesForLead(
     }
 
     // Fetch from Instantly
-    const response = await axios.get(
-      "https://api.instantly.ai/api/v2/emails",
-      {
-        headers: authHeaders,
-        params,
-      }
-    );
+    const response = await axios.get("https://api.instantly.ai/api/v2/emails", {
+      headers: authHeaders,
+      params,
+    });
 
-    console.dir(response.data, { depth: null, colors: true });
+    // console.dir(response.data, { depth: null, colors: true });
     const emails = normalizeLeadsArray(response.data || []);
     const firstBody = emails[0]?.body?.text || "";
     const wordCount = await countWords(firstBody);
 
+    // console.log(
+    //   colorize(
+    //     `Fetched ${emails.length} replies for ${params.lead} -> ${wordCount} words in first email`,
+    //     "cyan"
+    //   )
+    // );
+
     console.log(
-      colorize(
-        `Fetched ${emails.length} replies for ${params.lead} -> ${wordCount} words in first email`,
-        "cyan"
-      )
+      colorize("[ Fetched Reply Word Count ", "green"),
+      colorize(`${wordCount}`, "cyan"),
+      colorize("]", "green"),
+      "lead: ",
+      colorize(`${params.lead}`, "cyan")
     );
 
     return { lead, emails, success: true };
   } catch (error) {
     console.error(`fetchRepliesForLead : ${lead.email}:`, error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`fetchRepliesForLead : ${error.message}`);
+    if (setErrorContext)
+      setErrorContext(`fetchRepliesForLead : ${error.message}`);
     return { lead, emails: [], error: error.message, success: false };
   }
 }

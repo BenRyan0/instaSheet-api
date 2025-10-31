@@ -10,7 +10,7 @@ const COLORS = {
   magenta: "\x1b[35m",
   cyan: "\x1b[36m",
   white: "\x1b[37m",
-
+  orange: "\x1b[38;5;208m", // added orange (256-color)
   // Light (bright) variants
   lightBlack: "\x1b[90m",   // gray
   lightRed: "\x1b[91m",

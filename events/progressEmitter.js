@@ -1,4 +1,5 @@
 const { getIO } = require("../socket");
+const { colorize } = require("../utils/colorLogger");
       
 function buildProgressState({
   pagesFetched,
@@ -51,12 +52,14 @@ function buildProgressState({
 
 const io = getIO();
 
-function emitProgress(ctx) {
+function emitProgress({ctx,show}) {
+const showConsole = show ?? true;
   const state = buildProgressState(ctx);
   // 1) Broadcast internally via EventEmitter
   io.emit("progress", state);
   // 2) (Optional) Log to console for debugging
-  console.log("[ProgressEmitted]");
+  if(showConsole) console.log(colorize("[ProgressEmitted]","magenta"))
+ 
   // console.log("[emitProgress]", state);
 }
 

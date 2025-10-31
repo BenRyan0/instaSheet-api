@@ -28,7 +28,9 @@ const {
 } = require("../../services/instantly/lead/replyService");
 const { colorize } = require("../../utils/colorLogger");
 
+
 class instantlyAiController {
+  
   getInterestedRepliesOnly_ = async (req, res) => {
     try {
       const { opts, sheetName, autoAppend } = req.body;
@@ -47,7 +49,7 @@ class instantlyAiController {
         aiInterestThreshold: opts.aiInterestThreshold,
       });
 
-      emitProgress(state);
+      emitProgress({ctx:state});
       let cursor = null;
 
       while (shouldContinue(state) && !runCtx.errorOccurred) {
@@ -65,12 +67,7 @@ class instantlyAiController {
         const spreadsheetId = env.SPREADSHEET_ID
 
         const {newLeads,error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
-        console.log("-------- newLeads --------")
-        newLeads.forEach(function(lead,i){
-          console.log(colorize(`${i+1}. ${lead.email}`, "blue" ))
-          console.log()
-        })
-        // const newLeads = filterNewLeads(leads, seen);
+        console.log(colorize(`[ lead count ${newLeads.length}]`,"lightCyan"))
         if (!newLeads.length) continue;
 
         for (const lead of newLeads) {
@@ -102,7 +99,7 @@ class instantlyAiController {
             }
           }
 
-          emitProgress(state);
+          emitProgress({ctx:state,show:false});
         }
       }
 

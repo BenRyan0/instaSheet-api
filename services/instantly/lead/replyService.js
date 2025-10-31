@@ -1,3 +1,4 @@
+const { colorize } = require("../../../utils/colorLogger");
 const { isInterestedReply } = require("../../../utils/filters");
 const { normalizeKey, markProcessed } = require("../../dedupService");
 const { fetchRepliesForLead } = require("../../emailService");
@@ -15,6 +16,7 @@ async function getInterestedReplies({
     setErrorOccurred,
     setErrorContext,
   }) {
+ 
     const result = await fetchRepliesForLead(lead, {
       perLeadLimit: opts.emailsPerLead,
       authHeaders,

@@ -1,9 +1,0 @@
-# requirements for isUsBased.py
-# Core third-party packages used by the script
-python-dotenv
-firecrawl
-
-# Notes:
-# - `python-dotenv` provides `load_dotenv` used at the top of the script.
-# - `firecrawl` is the Python client for Firecrawl used via `from firecrawl import Firecrawl`.
-# If you want pinned versions, tell me which versions to lock (or I can try to infer from a lockfile).

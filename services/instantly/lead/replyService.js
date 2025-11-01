@@ -27,8 +27,8 @@ async function getInterestedReplies({
     });
 
     if (result.skipped || result.error) {
-      const key = normalizeKey(lead.email || lead.lead) || lead.id;
-      if (key) await markProcessed(key, redisClient, dedupKey, seen);
+      // const key = normalizeKey(lead.email || lead.lead) || lead.id;
+      // if (key) await markProcessed(key, redisClient, dedupKey, seen);
       return [];
     }
 

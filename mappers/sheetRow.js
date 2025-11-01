@@ -4,7 +4,6 @@ const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
 const env = require("../env");
 
-
 // Helper: Check if email body is valid
 function validateEmailBody(emailBodyText) {
   if (
@@ -115,7 +114,7 @@ function buildSheetRow({
     "sales person email": salesPersonEmail || "none",
     company: lead?.company_name || lead?.company || "none",
     "company phone#": lead?.phone || "none",
-    "phone#from email":extracted.phone_numbers || phoneFromEmail || "none",
+    "phone#from email": extracted.phone_numbers || phoneFromEmail || "none",
     "lead first name": firstName || "none",
     "lead last name": lastName || "none",
     "lead email": leadEmail || "none",
@@ -124,15 +123,31 @@ function buildSheetRow({
     "phone 1": phone1 || "none",
     "#": phone1 || "none",
     phone2: phone2 || "none",
-    address: payload.street || payload.street1 || payload.address || lead?.address || "none",
+    address:
+      payload.street ||
+      payload.street1 ||
+      payload.address ||
+      lead?.address ||
+      "none",
     city: payload.city || lead?.city || "none",
-    state: payload.state || lead?.state || payload.organization_state || payload["state/region"] || "none",
+    state:
+      payload.state ||
+      lead?.state ||
+      payload.organization_state ||
+      payload["state/region"] ||
+      "none",
     zip:
       payload.zip ||
       payload.zip_code ||
       payload.organization_postal_code ||
       "none",
-    details: payload.description || lead?.description || lead?.business_highlight_description || lead?.website || "none",
+    details:
+      payload.description ||
+      lead?.description ||
+      lead?.business_highlight_description ||
+      lead?.website ||
+      payload.website ||
+      "none",
     "Email Signature": extracted.signature || emailSignature || "none",
     "linkedin link": "none",
     "status after the call": "none",
@@ -147,8 +162,8 @@ async function mapToSheetRow({
   setErrorContext,
 }) {
   try {
-    // console.log(colorize("LEAD", "cyan"), lead);
-    // console.log(colorize("EMAIL", "cyan"), email);
+    console.log(colorize("LEAD", "cyan"), lead);
+    console.log(colorize("EMAIL", "cyan"), email);
     const emailBodyText = email?.body?.text || "";
 
     // Step 1: Validate email body

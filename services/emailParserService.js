@@ -1,6 +1,11 @@
 const env = require("../env");
 const axios = require("axios");
 const { colorize } = require("../utils/colorLogger");
+const { Firecrawl } = require("firecrawl");
+
+const firecrawl = new Firecrawl({
+  apiKey: env.FIRECRAWL_API
+});
 
 function cleanEmailContent(rawEmail, maxWords = 100) {
   if (!rawEmail || typeof rawEmail !== "string") return "";
@@ -231,6 +236,33 @@ function normalizeSchema(obj = {}) {
   };
 }
 
+async function getWebsiteData(url) {
+  if (!url) {
+    console.error("No URL provided.");
+    return null;
+  }
+  try {
+    const response = await firecrawl.scrape(url, {
+      formats: ["markdown"],
+    });
+
+    if (!response) {
+      console.warn("No response received from Firecrawl.");
+      return null;
+    }
+
+ 
+    const description =
+      response.metadata?.description ||
+      response.metadata?.ogDescription ||
+      "none";
+    return description;
+  } catch (error) {
+    console.error("Firecrawl scrape error:", error.message || error);
+    return null;
+  }
+}
+
 async function extractBusinessDescription({
   websiteUrl,
   serpApiKey = process.env.SERPAPI_KEY,
@@ -250,26 +282,17 @@ async function extractBusinessDescription({
     return { description: "none" };
   }
 
-  const serpApiUrl = "https://serpapi.com/search.json";
   const normalizedUrl = websiteUrl.replace(/^https?:\/\//, "").split("/")[0];
-  const query = `site:${normalizedUrl}`;
   const maxRetries = 3;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const { data } = await axios.get(serpApiUrl, {
-        params: { q: query, api_key: serpApiKey, num: 1, hl: "en" },
-        timeout: 60000,
-      });
-
-      const description =
-        data?.knowledge_graph?.description ||
-        data?.organic_results?.[0]?.snippet ||
-        data?.organic_results?.[0]?.rich_snippet?.top?.extensions?.join(" ") ||
-        "none";
+      const description = await getWebsiteData(normalizedUrl);
 
       setErrorOccurred?.(false);
-      return { description };
+
+      console.log(colorize("DESCRIPTION [EXTRACTED]","green"))
+      return description;
     } catch (err) {
       const status = err.response?.status;
       const message =

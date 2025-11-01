@@ -63,13 +63,6 @@ async function fetchRepliesForLead(
     const firstBody = emails[0]?.body?.text || "";
     const wordCount = await countWords(firstBody);
 
-    // console.log(
-    //   colorize(
-    //     `Fetched ${emails.length} replies for ${params.lead} -> ${wordCount} words in first email`,
-    //     "cyan"
-    //   )
-    // );
-
     console.log(
       colorize("[ Fetched Reply Word Count ", "green"),
       colorize(`${wordCount}`, "cyan"),

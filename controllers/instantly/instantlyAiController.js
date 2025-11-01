@@ -47,7 +47,7 @@ class instantlyAiController {
         //   "maxPages": 10, maximumm pages to process, if reached the loop will stop
         //   "aiInterestThreshold": 1 ai threshold in fetching the leads
 
-      const { opts, sheetName, autoAppend } = req.body;
+      const { opts, sheetName, autoAppend, descriptionExtraction } = req.body;
       if(!opts || !sheetName){
         return responseReturn(res, 400, {error : "SheetName and Options is required"})
       }
@@ -133,6 +133,7 @@ class instantlyAiController {
               sheetName,
               runContext: runCtx,
               autoAppend,
+              descriptionExtraction
             });
 
             // if the process was done and no errors has occured set the lead email as processed

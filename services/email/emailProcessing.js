@@ -8,6 +8,7 @@ const {
   isAddressUsBased,
   isWebsiteUsBased,
   isActuallyInterested,
+  identifyBusinessCountry,
 } = require("../../services/instantly/lead/interestService");
 const {
   encodeToSheet,
@@ -61,15 +62,14 @@ async function processEmailRow({
       );
 
       if (interested) {
-        console.log("-------- rowJson.details --------")
-        console.log(rowJson.details)
+        console.log("-------- rowJson.details --------");
+        console.log(rowJson.details);
         // Replace details (website) with business description if available
         if (rowJson.details && rowJson.details !== "none") {
           // Check if details looks like a valid URL
           const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
             rowJson.details.trim()
           );
-
 
           if (isValidUrl) {
             try {
@@ -82,10 +82,10 @@ async function processEmailRow({
 
               if (
                 descResult &&
-                typeof descResult.description === "string" &&
-                descResult.description.trim()
+                typeof descResult === "string" &&
+                descResult.trim()
               ) {
-                rowJson.details = descResult.description.trim(); // overwrite with extracted description
+                rowJson.details = descResult;
               } else {
                 rowJson.details = "none";
               }
@@ -127,8 +127,12 @@ async function processEmailRow({
 
     // ---------- Step 2: Website Present ----------
     if (rowJson.details && rowJson.details !== "none") {
-      const usWebsite = await isWebsiteUsBased(rowJson.details);
-      if (!usWebsite) return true;
+      if (additionalContext.Website && additionalContext.Website !== "none") {
+        const usWebsite = await identifyBusinessCountry(
+          additionalContext.Website
+        );
+        if (!usWebsite) return true;
+      }
 
       const interested = await isActuallyInterested(
         rowJson["email reply"],
@@ -147,10 +151,10 @@ async function processEmailRow({
 
           if (
             descResult &&
-            typeof descResult.description === "string" &&
-            descResult.description.trim()
+            typeof descResult === "string" &&
+            descResult.trim()
           ) {
-            rowJson.details = descResult.description;
+            rowJson.details = descResult;
           } else {
             rowJson.details = "none";
           }
@@ -167,7 +171,8 @@ async function processEmailRow({
           addToTotalEncoded,
           setErrorOccurred,
           setErrorContext,
-          addTotalToBeApproved
+          addTotalToBeApproved,
+          autoAppend
         );
       }
 
@@ -208,7 +213,6 @@ async function processEmailWithRetry({
 
   // Skip processing if row is null, undefined, or empty
   if (!row || (typeof row === "object" && Object.keys(row).length === 0)) {
-    console.warn("Skipping processEmailRow: empty or invalid row");
     return false;
   }
 
@@ -222,6 +226,7 @@ async function processEmailWithRetry({
           ClientID: lead.id || "N/A",
           Category: lead.category || "Uncategorized",
           TimeStamp: email.timestamp_email || new Date().toISOString(),
+          Website: lead.website || "none",
         },
         addToTotalEncoded: runContext.addToTotalEncoded,
         addTotalToBeApproved: runContext.addTotalToBeApproved,
@@ -241,52 +246,5 @@ async function processEmailWithRetry({
 
   return processed;
 }
-
-// async function processEmailWithRetry({
-//   lead,
-//   email,
-//   sheetName,
-//   runContext,
-//   maxRetries = 3,
-//   autoAppend,
-// }) {
-//   let row;
-//   try {
-//     row = await mapToSheetRow({
-//       lead,
-//       email,
-//       setErrorOccurred: runContext.setErrorOccurred,
-//       setErrorContext: runContext.setErrorContext,
-//     });
-//   } catch (err) {
-//     console.warn("mapToSheetRow failed", err.message);
-//     return false;
-//   }
-
-//   let processed = false;
-//   for (let attempts = 1; attempts <= maxRetries; attempts++) {
-//     try {
-//       processed = await processEmailRow({
-//         emailRow: row,
-//         sheetName,
-//         additionalContext: {
-//           ClientID: lead.id || "N/A",
-//           Category: lead.category || "Uncategorized",
-//           TimeStamp: email.timestamp_email || new Date().toISOString(),
-//         },
-//         addToTotalEncoded: runContext.addToTotalEncoded,
-//         addTotalToBeApproved: runContext.addTotalToBeApproved,
-//         setErrorOccurred: runContext.setErrorOccurred,
-//         setErrorContext: runContext.setErrorContext,
-//         autoAppend
-//       });
-//       if (processed) break;
-//     } catch (err) {
-//       console.warn("processEmailRow error", err.message);
-//     }
-//     await new Promise((r) => setTimeout(r, 500 * attempts));
-//   }
-//   return processed;
-// }
 
 module.exports = { processEmailRow, processEmailWithRetry };

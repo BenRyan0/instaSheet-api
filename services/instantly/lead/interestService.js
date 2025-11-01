@@ -12,7 +12,7 @@ const regexes = Object.fromEntries(
 );
 
 const firecrawl = new Firecrawl({
-  apiKey: "fc-83313d19e915493ea604a12cd3a8f97c",
+  apiKey: env.FIRECRAWL_API,
 });
 // 🇺🇸 US keyword and address/phone indicators
 const US_PATTERNS = [

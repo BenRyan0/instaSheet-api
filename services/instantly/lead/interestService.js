@@ -538,9 +538,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
 
   if (!apiKeys.length) {
-    console.error(
-      "No OpenRouter API keys available → using rule-based fallback."
-    );
+    console.error("No OpenRouter API keys available → using rule-based fallback.");
     return ruleBasedCheck(text);
   }
 
@@ -552,9 +550,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
     const currentKey = apiKeys[keyIndex];
 
     console.log(
-      `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
-        keyIndex + 1
-      })`
+      `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${keyIndex + 1})`
     );
 
     try {
@@ -574,34 +570,43 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
               {
                 role: "system",
                 content: `
-                You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
+                  You are an intelligent assistant that determines the *intent* of an email reply regarding a business funding offer.
 
-                ### OFFER CONTEXT
-                We provide working capital or cash advances to businesses based on their gross receipts.
-                - Credit score does not affect eligibility.
-                - Funding can be released within 24 hours.
+                  ---
 
-                ### YOUR TASK
-                Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
+                  ### OFFER CONTEXT
+                  We provide **working capital or cash advances** to businesses based on their gross receipts.
+                  - Credit score does not affect eligibility.
+                  - Funding can be released within 24 hours.
 
-                ### CLASSIFY AS TRUE IF:
-                - The reply shows curiosity, openness, or willingness to continue the conversation.
-                - The sender asks for a summary, information, or clarification — even briefly.
-                - The reply includes positive or permissive phrases such as:
-                  "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
-                  "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
-                  "Give me a call", "We need funding", "What are the terms?"
-                - The tone is polite and allows engagement.
-                - The sender refers you to another person handling funding or finance decisions.
+                  ---
 
-                ### CLASSIFY AS FALSE IF:
-                - The reply rejects the offer: "Not interested", "No thanks", "We already got funding", "Stop emailing me".
-                - The reply requests something unrelated (grants, jobs, donations, etc.).
-                - The reply is automated or non-human ("Received", "Out of office", "Unsubscribe").
-                - The reply expresses negative sentiment toward the offer.
+                  ### YOUR TASK
+                  Analyze the email reply and classify it based on what the sender seems **interested** in:
 
-                Respond strictly with one lowercase word: **true** or **false**.
-              `,
+                  1. **"offer"** → The sender is interested in or curious about the *funding offer* itself.
+                    - They ask for terms, summaries, or more info about funding.
+                    - They express willingness to talk, schedule a call, or proceed.
+                    - They refer you to someone who handles funding/finance decisions.
+
+                  2. **"partnership"** → The sender is interested in a *business collaboration or partnership*,
+                    not in the funding offer itself.
+                    - They mention working together, collaboration, cross-promotion, or other joint efforts.
+                    - They show intent to “partner up,” “team up,” or “cooperate.”
+
+                  3. **"false"** → The sender is *not interested* in either the funding offer or a partnership.
+                    - They reject, unsubscribe, or express disinterest.
+                    - They ask for something unrelated (grants, jobs, donations, etc.).
+                    - The message is automated, non-human, or off-topic.
+
+                  ---
+
+                  ### RESPONSE FORMAT
+                  Respond **strictly** with one lowercase word:
+                  - "offer" → if interested in the funding offer  
+                  - "partnership" → if interested in collaboration/partnership  
+                  - "false" → if not interested or irrelevant
+                `,
               },
               { role: "user", content: text },
             ],
@@ -613,11 +618,10 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
       console.log("Response status:", resp.status);
 
-      // HTTP error handling
       if (!resp.ok) {
         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
         attempt++;
-        await new Promise((r) => setTimeout(r, 2000 * attempt)); // linear backoff
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
 
@@ -628,245 +632,190 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
         "";
 
       const normalizedOut =
-        (modelOut.match(/\b(true|false|yes|no|interested|not interested)\b/i) ||
-          [])[1]?.toLowerCase() || "";
+        (modelOut.match(/\b(offer|partnership|false)\b/i) || [])[1]?.toLowerCase() || "";
 
       if (!normalizedOut) {
         console.warn(`Unexpected LLM output: "${modelOut}"`);
         attempt++;
-        continue; // retry again
+        continue;
       }
 
-      if (["true", "yes", "interested"].includes(normalizedOut)) {
-        console.log("Classified as: TRUE (interested)");
-        if (typeof addTotalInterestedLLM === "function")
-          addTotalInterestedLLM(1);
-        return true;
+      if (normalizedOut === "offer") {
+        console.log("Classified as: OFFER (interested in funding offer)");
+        if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
+        return { interested: true, type: "offer" };
       }
 
-      if (["false", "no", "not interested"].includes(normalizedOut)) {
+      if (normalizedOut === "partnership") {
+        console.log("Classified as: PARTNERSHIP (interested in collaboration)");
+        return { interested: true, type: "partnership" };
+      }
+
+      if (normalizedOut === "false") {
         console.log("Classified as: FALSE (not interested)");
-        return false;
+         return { interested: false, type: null };
       }
 
-      // Unrecognized → treat as false
       console.warn(`Unrecognized classification output: "${modelOut}"`);
       return false;
     } catch (err) {
-      console.error(
-        `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
-      );
+      console.error(`Attempt #${attempt + 1} failed (${err.name}: ${err.message})`);
       attempt++;
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
   }
 
-  // --- Final fallback after all attempts ---
   console.warn("All retries failed → using rule-based fallback check...");
   const ruleResult = ruleBasedCheck(text);
   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
   return ruleResult;
 }
 
-// --- Main Function: Classify Interest ---
-// async function isActuallyInterested(
-//   emailReply,
-//   addTotalInterestedLLM,
-//   useLocal = false,
-//   keyIndex = 0
-// ) {
+
+// async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 //   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
 //     console.warn("Skipping empty or invalid email reply");
 //     return false;
 //   }
 
 //   const text = normalize(emailReply);
+//   const url = "https://openrouter.ai/api/v1/chat/completions";
+//   const apiKeys = [
+//     env.OPENROUTER_API_KEY,
+//     env.OPENROUTER_API_KEY2,
+//     env.OPENROUTER_API_KEY3,
+//   ].filter(Boolean);
 
-//   try {
-//     // --- Local Fallback Shortcut ---
-//     if (useLocal) {
-//       console.warn("Using local fallback → sending to n8n webhook...");
-//       return await sendToN8nWebhook(emailReply);
-//     }
+//   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
 
-//     // --- API Setup ---
-//     const url = "https://openrouter.ai/api/v1/chat/completions";
-//     const apiKeys = [
-//       env.OPENROUTER_API_KEY,
-//       env.OPENROUTER_API_KEY2,
-//       env.OPENROUTER_API_KEY3,
-//     ].filter(Boolean);
-
-//     if (!apiKeys.length) {
-//       console.error("No OpenRouter API keys available → using n8n fallback.");
-//       return await sendToN8nWebhook(emailReply);
-//     }
-
-//     const currentKey = apiKeys[keyIndex % apiKeys.length];
-//     const headers = {
-//       Authorization: `Bearer ${currentKey}`,
-//       "Content-Type": "application/json",
-//     };
-//     const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
-//     console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1})`);
-
-//     // --- Fetch with timeout protection ---
-//     const resp = await fetchWithTimeout(
-//       url,
-//       {
-//         method: "POST",
-//         headers,
-//         body: JSON.stringify({
-//           model,
-//           messages: [
-//             {
-//               role: "system",
-//               content: `
-//                   You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
-
-//                   ### OFFER CONTEXT
-//                   We provide working capital or cash advances to businesses based on their gross receipts.
-//                   - Credit score does not affect eligibility.
-//                   - Funding can be released within 24 hours.
-
-//                   ### YOUR TASK
-//                   Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
-
-//                   ### CLASSIFY AS TRUE IF:
-//                   - The reply shows curiosity, openness, or willingness to continue the conversation.
-//                   - The sender asks for a summary, information, or clarification — even briefly.
-//                   - The reply includes positive or permissive phrases such as:
-//                     "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
-//                     "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
-//                     "Give me a call", "We need funding", "What are the terms?"
-//                   - The tone is polite and allows engagement.
-//                   - The sender refers you to another person handling funding or finance decisions.
-
-//                   ### CLASSIFY AS FALSE IF:
-//                   - The reply rejects the offer: "Not interested", "No thanks", "We already got funding", "Stop emailing me".
-//                   - The reply requests something unrelated (grants, jobs, donations, etc.).
-//                   - The reply is automated or non-human ("Received", "Out of office", "Unsubscribe").
-//                   - The reply expresses negative sentiment toward the offer.
-
-//                   Respond strictly with one lowercase word: **true** or **false**.
-//               `,
-//             },
-//             { role: "user", content: text },
-//           ],
-//           temperature: 0,
-//         }),
-//       },
-//       60000 // 60s timeout
+//   if (!apiKeys.length) {
+//     console.error(
+//       "No OpenRouter API keys available → using rule-based fallback."
 //     );
-
-//     console.log("RESPONSE IN ISACTUALLYINTERESTED:", resp.status);
-
-//     // --- Handle HTTP Errors ---
-//     if (!resp.ok) {
-//       console.error("LLM ERROR:", resp.status);
-
-//       if (resp.status === 429 && keyIndex < apiKeys.length - 1) {
-//         const delay = 2000 * (keyIndex + 1);
-//         console.warn(
-//           `Rate limited on key #${keyIndex + 1}. Retrying in ${
-//             delay / 1000
-//           }s...`
-//         );
-//         await new Promise((r) => setTimeout(r, delay));
-//         return await isActuallyInterested(
-//           emailReply,
-//           addTotalInterestedLLM,
-//           false,
-//           keyIndex + 1
-//         );
-//       }
-
-//       if (keyIndex >= apiKeys.length - 1) {
-//         console.error("All API keys exhausted → using n8n fallback.");
-//         return await isActuallyInterested(
-//           emailReply,
-//           addTotalInterestedLLM,
-//           true
-//         );
-//       }
-
-//       console.warn(`HTTP error on key #${keyIndex + 1}. Trying next key...`);
-//       return await isActuallyInterested(
-//         emailReply,
-//         addTotalInterestedLLM,
-//         false,
-//         keyIndex + 1
-//       );
-//     }
-
-//     // --- Parse Response Safely ---
-//     const json = await resp.json();
-//     const modelOut =
-//       json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-//       json.choices?.[0]?.text?.trim()?.toLowerCase() ||
-//       "";
-
-//     const normalizedOut =
-//       (modelOut.match(/\b(true|false|yes|no|interested|not interested)\b/i) ||
-//         [])[1]?.toLowerCase() || "";
-
-//     if (!normalizedOut) {
-//       console.warn(`Unexpected LLM output on key #${keyIndex + 1}:`, modelOut);
-
-//       if (keyIndex === 1 && apiKeys.length > 2) {
-//         console.warn("Unexpected output on Key #2 → jumping to Key #3...");
-//         return await isActuallyInterested(
-//           emailReply,
-//           addTotalInterestedLLM,
-//           false,
-//           2
-//         );
-//       }
-
-//       if (keyIndex < apiKeys.length - 1) {
-//         console.warn(`Retrying with next API key (#${keyIndex + 2})...`);
-//         return await isActuallyInterested(
-//           emailReply,
-//           addTotalInterestedLLM,
-//           false,
-//           keyIndex + 1
-//         );
-//       }
-
-//       console.error("All API keys exhausted → using n8n fallback.");
-//       return await isActuallyInterested(
-//         emailReply,
-//         addTotalInterestedLLM,
-//         true
-//       );
-//     }
-
-//     // --- Final Classification ---
-//     if (["true", "yes", "interested"].includes(normalizedOut)) {
-//       console.log("Classified as: TRUE (interested)");
-//       if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
-//       return true;
-//     }
-
-//     if (["false", "no", "not interested"].includes(normalizedOut)) {
-//       console.log("Classified as: FALSE (not interested)");
-//       return false;
-//     }
-
-//     console.warn("Unexpected classification output:", modelOut);
-//   } catch (err) {
-//     console.error("LLM classification error:", err.name, err.message);
-//     if (err.name === "AbortError") {
-//       console.warn(
-//         "Request aborted due to timeout → triggering n8n fallback..."
-//       );
-//     }
-//     return await sendToN8nWebhook(emailReply);
+//     return ruleBasedCheck(text);
 //   }
 
-//   // --- Final Fallback: Rule-Based Check ---
+//   let attempt = 0;
+//   const maxAttempts = 3;
+
+//   while (attempt < maxAttempts) {
+//     const keyIndex = attempt % apiKeys.length;
+//     const currentKey = apiKeys[keyIndex];
+
+//     console.log(
+//       `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
+//         keyIndex + 1
+//       })`
+//     );
+
+//     try {
+//       const headers = {
+//         Authorization: `Bearer ${currentKey}`,
+//         "Content-Type": "application/json",
+//       };
+
+//       const resp = await fetchWithTimeout(
+//         url,
+//         {
+//           method: "POST",
+//           headers,
+//           body: JSON.stringify({
+//             model,
+//             messages: [
+//               {
+//                 role: "system",
+//                 content: `
+//                 You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
+
+//                 ### OFFER CONTEXT
+//                 We provide working capital or cash advances to businesses based on their gross receipts.
+//                 - Credit score does not affect eligibility.
+//                 - Funding can be released within 24 hours.
+
+//                 ### YOUR TASK
+//                 Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
+
+//                 ### CLASSIFY AS TRUE IF:
+//                 - The reply shows curiosity, openness, or willingness to continue the conversation.
+//                 - The sender asks for a summary, information, or clarification — even briefly.
+//                 - The reply includes positive or permissive phrases such as:
+//                   "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
+//                   "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
+//                   "Give me a call", "We need funding", "What are the terms?"
+//                 - The tone is polite and allows engagement.
+//                 - The sender refers you to another person handling funding or finance decisions.
+
+//                 ### CLASSIFY AS FALSE IF:
+//                 - The reply rejects the offer: "Not interested", "No thanks", "We already got funding", "Stop emailing me".
+//                 - The reply requests something unrelated (grants, jobs, donations, etc.).
+//                 - The reply is automated or non-human ("Received", "Out of office", "Unsubscribe").
+//                 - The reply expresses negative sentiment toward the offer.
+
+//                 Respond strictly with one lowercase word: **true** or **false**.
+//               `,
+//               },
+//               { role: "user", content: text },
+//             ],
+//             temperature: 0,
+//           }),
+//         },
+//         60000 // 60s timeout
+//       );
+
+//       console.log("Response status:", resp.status);
+
+//       // HTTP error handling
+//       if (!resp.ok) {
+//         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
+//         attempt++;
+//         await new Promise((r) => setTimeout(r, 2000 * attempt)); // linear backoff
+//         continue;
+//       }
+
+//       const json = await resp.json();
+//       const modelOut =
+//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
+//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
+//         "";
+
+//       const normalizedOut =
+//         (modelOut.match(/\b(true|false|yes|no|interested|not interested)\b/i) ||
+//           [])[1]?.toLowerCase() || "";
+
+//       if (!normalizedOut) {
+//         console.warn(`Unexpected LLM output: "${modelOut}"`);
+//         attempt++;
+//         continue; // retry again
+//       }
+
+//       if (["true", "yes", "interested"].includes(normalizedOut)) {
+//         console.log("Classified as: TRUE (interested)");
+//         if (typeof addTotalInterestedLLM === "function")
+//           addTotalInterestedLLM(1);
+//         return true;
+//       }
+
+//       if (["false", "no", "not interested"].includes(normalizedOut)) {
+//         console.log("Classified as: FALSE (not interested)");
+//         return false;
+//       }
+
+//       // Unrecognized → treat as false
+//       console.warn(`Unrecognized classification output: "${modelOut}"`);
+//       return false;
+//     } catch (err) {
+//       console.error(
+//         `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
+//       );
+//       attempt++;
+//       await new Promise((r) => setTimeout(r, 2000 * attempt));
+//     }
+//   }
+
+//   // --- Final fallback after all attempts ---
+//   console.warn("All retries failed → using rule-based fallback check...");
 //   const ruleResult = ruleBasedCheck(text);
-//   console.log(`Fallback rule-based result: ${ruleResult ? "TRUE" : "FALSE"}`);
+//   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
 //   return ruleResult;
 // }
 

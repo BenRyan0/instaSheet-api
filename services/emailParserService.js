@@ -4,7 +4,7 @@ const { colorize } = require("../utils/colorLogger");
 const { Firecrawl } = require("firecrawl");
 
 const firecrawl = new Firecrawl({
-  apiKey: env.FIRECRAWL_API
+  apiKey: env.FIRECRAWL_API,
 });
 
 function cleanEmailContent(rawEmail, maxWords = 100) {
@@ -63,6 +63,8 @@ async function extractReply({
       console.log(colorize("CleanedContent", "cyan"));
       console.log(cleanedContent);
     } else {
+      cleanedContent = emailContent;
+      console.log(cleanedContent);
       console.log(
         `Skipping cleanEmailContent — only ${wordCount} words detected.`
       );
@@ -251,7 +253,6 @@ async function getWebsiteData(url) {
       return null;
     }
 
- 
     const description =
       response.metadata?.description ||
       response.metadata?.ogDescription ||
@@ -291,7 +292,7 @@ async function extractBusinessDescription({
 
       setErrorOccurred?.(false);
 
-      console.log(colorize("DESCRIPTION [EXTRACTED]","green"))
+      console.log(colorize("DESCRIPTION [EXTRACTED]", "green"));
       return description;
     } catch (err) {
       const status = err.response?.status;

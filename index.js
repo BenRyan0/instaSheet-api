@@ -6,6 +6,7 @@ const bodyParser = require("body-parser");
 const { init: initSocket } = require("./socket"); 
 
 const env = require("./env");
+const clearRedisData = require("./config/clearRedis");
 const port = env.PORT || 3000;
 const server = http.createServer(app);
 
@@ -46,6 +47,11 @@ app.use("/api", require("./routes/loggerRoutes"));
 app.get("/", (req, res) => {
   res.send("You Have Reached the endpoint of instaSheet");
 });
+
+
+// (async () => {
+//   await clearRedisData();
+// })()
 
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

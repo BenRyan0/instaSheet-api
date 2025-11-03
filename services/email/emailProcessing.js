@@ -55,13 +55,20 @@ async function processEmailRow({
 
       if (!usAddress) return true;
 
-      const interested = await isActuallyInterested(
+      const { interested, type } = await isActuallyInterested(
         rowJson["email reply"],
         addTotalEnterestedLLM,
         false
       );
 
       if (interested) {
+        const sheetNameForOffer = sheetName;
+        const sheetNameForPartnership = "Partner MCA";
+
+        // Corrected logic: use the proper sheet based on the type
+        const sheetNameToUse =
+          type === "partnership" ? sheetNameForPartnership : sheetNameForOffer;
+
         console.log("-------- rowJson.details --------");
         console.log(rowJson.details);
         // Replace details (website) with business description if available
@@ -111,14 +118,15 @@ async function processEmailRow({
 
         await encodeToSheet(
           spreadsheetId,
-          sheetName,
+          (sheetName = sheetNameToUse),
           rowJson,
           additionalContext,
           addToTotalEncoded,
           setErrorOccurred,
           setErrorContext,
           addTotalToBeApproved,
-          autoAppend
+          autoAppend,
+          type
         );
       }
 
@@ -134,13 +142,24 @@ async function processEmailRow({
         if (!usWebsite) return true;
       }
 
-      const interested = await isActuallyInterested(
+      const { interested, type } = await isActuallyInterested(
         rowJson["email reply"],
         addTotalEnterestedLLM,
         false
       );
 
+      console.log("type");
+      console.log(type);
+
+      console.log("interested");
+      console.log(interested);
       if (interested) {
+        const sheetNameForOffer = sheetName
+        const sheetNameForPartnership = "Partner MCA";
+
+        // Corrected logic: use the proper sheet based on the type
+        const sheetNameToUse =
+          type === "partnership" ? sheetNameForPartnership : sheetNameForOffer;
         try {
           const descResult = await extractBusinessDescription({
             websiteUrl: rowJson.details,
@@ -165,14 +184,15 @@ async function processEmailRow({
 
         await encodeToSheet(
           spreadsheetId,
-          sheetName,
+          (sheetName = sheetNameToUse),
           rowJson,
           additionalContext,
           addToTotalEncoded,
           setErrorOccurred,
           setErrorContext,
           addTotalToBeApproved,
-          autoAppend
+          autoAppend,
+          type
         );
       }
 

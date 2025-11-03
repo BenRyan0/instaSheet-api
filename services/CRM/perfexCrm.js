@@ -27,7 +27,7 @@ async function postAfterEncoding(args) {
     tags,
     title: "",
     email: rowJson["lead email"] || "",
-    website: additionalContext.website || "",
+    website: additionalContext.Website || "",
     phonenumber: rowJson["company phone#"] || "",
     company: rowJson.company || "",
     address: rowJson.address || "",

@@ -21,7 +21,7 @@ async function getInterestedReplies({
       perLeadLimit: opts.emailsPerLead,
       authHeaders,
       delayMs: opts.delayMs,
-      is_unread: opts.is_unread,
+      // is_unread: opts.is_unread,
       setErrorOccurred,
       setErrorContext,
     });

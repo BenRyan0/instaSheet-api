@@ -80,7 +80,7 @@ class webhookController {
       }
 
       const spreadsheetId = env.SPREADSHEET_ID;
-      const { newLeads, error } = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
+      const { newLeads, error } = await filterNewLeads(leads, seen, sheetName,sheetNameForPartnership, spreadsheetId);
 
       if (error) {
         errorBatchCount++;

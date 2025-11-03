@@ -169,7 +169,6 @@ async function encodeToSheet(
   setErrorContext,
   addTotalToBeApproved,
   autoAppend,
-  type
 ) {
   const { sheets } = await initGoogleClients();
 
@@ -222,12 +221,14 @@ async function encodeToSheet(
   // STEP 5: Append row
   const appendResp = await appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson);
   console.log(`Appended row to "${sheetName}"`);
+  await incrementApprovedEncodingLead();
 
   if (typeof addToTotalEncoded === "function") addToTotalEncoded(1);
 
   // STEP 6: Post-processing
   const nextRow = allValues.length + 1;
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
+  
   await postAfterEncoding({
     rowJson,
     sheetUrl,
@@ -581,8 +582,7 @@ async function encodeLeadFromRequest({
       console.log(`Lead ID ${leadData.id} marked as done.`);
     }
 
-    // 8️ Post-processing
-    await incrementApprovedEncodingLead({ createdAt: leadData.created_at });
+ 
 
     const additionalContext = {
       ClientID: leadData.clientid,
@@ -597,6 +597,14 @@ async function encodeLeadFromRequest({
       setErrorContext,
     });
 
+
+
+
+    
+    // 8️ Post-processing
+
+       await incrementApprovedEncodingLead();
+
     // Return both success and sheetUrl
     return { success: true, sheetUrl };
   } catch (error) {
@@ -607,10 +615,11 @@ async function encodeLeadFromRequest({
   }
 }
 
-async function incrementApprovedEncodingLead({ createdAt }) {
+async function incrementApprovedEncodingLead() {
   try {
     // Extract only the date part (YYYY-MM-DD)
-    const approvalDate = new Date(createdAt).toISOString().split("T")[0];
+    const approvalDate = new Date().toISOString().split("T")[0];
+    // const approvalDate = new Date(createdAt).toISOString().split("T")[0];
 
     // Upsert logic: insert if not exists, else increment count
     await con.query(
@@ -707,5 +716,6 @@ module.exports = {
   encodeToSheet,
   encodeLeadFromRequest,
   markToBeApprovedLead,
-  diagnoseGoogleSheetAccess
+  diagnoseGoogleSheetAccess,
+  incrementFetchedInterestedLead
 };

@@ -12,6 +12,7 @@ const {
 } = require("../../services/instantly/lead/interestService");
 const {
   encodeToSheet,
+  incrementFetchedInterestedLead,
 } = require("../../services/instantly/lead/encodeService");
 const { extractBusinessDescription } = require("../emailParserService");
 const { mapToSheetRow } = require("../../mappers/sheetRow");
@@ -64,6 +65,8 @@ async function processEmailRow({
 
       if (interested) {
         const sheetNameForOffer = sheetName;
+        await incrementFetchedInterestedLead()
+        
         // const sheetNameForPartnership = "Partner MCA";
 
         // Corrected logic: use the proper sheet based on the type
@@ -156,6 +159,7 @@ async function processEmailRow({
       console.log(interested);
       if (interested) {
         const sheetNameForOffer = sheetName;
+         await incrementFetchedInterestedLead()
         // const sheetNameForPartnership = "Partner MCA";
 
         // Corrected logic: use the proper sheet based on the type
@@ -249,7 +253,7 @@ async function processEmailWithRetry({
           ClientID: lead.id || "N/A",
           Category: lead.category || "Uncategorized",
           TimeStamp: email.timestamp_email || new Date().toISOString(),
-          Website: lead.website || "none",
+          Website: lead.website || lead.payload.website  || "none",
         },
         addToTotalEncoded: runContext.addToTotalEncoded,
         addTotalToBeApproved: runContext.addTotalToBeApproved,

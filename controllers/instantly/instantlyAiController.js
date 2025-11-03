@@ -58,6 +58,7 @@ class instantlyAiController {
       }
 
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+      let i = 0;
 
       // redis database prerequisites
       // the text as identifier of the emails
@@ -84,8 +85,10 @@ class instantlyAiController {
 
       // while loop -> checks first if the thresholds has not been reached yet
       while (shouldContinue(state) && !runCtx.errorOccurred) {
+    
         // appending +1 of the pages that is fetched
         state.nextPage();
+       
 
         // fetching the lead's details
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
@@ -118,7 +121,13 @@ class instantlyAiController {
         // each item of the array one by one
         for (const lead of newLeads) {
           // appending +1 to the total of leads processed
+          i++
+          console.log("---------------------------------------------- state")
+          console.log(i)
           state.nextLead();
+          console.log("state")
+          console.log(state)
+     
 
           // fetching the email replies of the leads
           const interestedEmails = await getInterestedReplies({
@@ -153,6 +162,8 @@ class instantlyAiController {
             }
           }
 
+        //     console.log("state")
+        // console.log(state)
           emitProgress({ ctx: state, show: false });
         }
       }

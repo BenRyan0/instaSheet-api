@@ -13,7 +13,7 @@ function initState({
     // Collections to report
     rows: [],
     // Mirrors Redis set size; distinct leads we’ve checked
-    distinctLeadsChecked: initialSeenCount,
+    distinctLeadsChecked: 0,
     // How many leads yielded ≥1 interested reply
     interestedLeadCount: 0,
     // Did we bail early (hit maxEmails or maxPages)?

@@ -19,6 +19,7 @@ const { mapToSheetRow } = require("../../mappers/sheetRow");
 async function processEmailRow({
   emailRow,
   sheetName,
+  sheetNameForPartnership,
   additionalContext,
   setErrorOccurred,
   setErrorContext,
@@ -63,7 +64,7 @@ async function processEmailRow({
 
       if (interested) {
         const sheetNameForOffer = sheetName;
-        const sheetNameForPartnership = "Partner MCA";
+        // const sheetNameForPartnership = "Partner MCA";
 
         // Corrected logic: use the proper sheet based on the type
         const sheetNameToUse =
@@ -154,8 +155,8 @@ async function processEmailRow({
       console.log("interested");
       console.log(interested);
       if (interested) {
-        const sheetNameForOffer = sheetName
-        const sheetNameForPartnership = "Partner MCA";
+        const sheetNameForOffer = sheetName;
+        // const sheetNameForPartnership = "Partner MCA";
 
         // Corrected logic: use the proper sheet based on the type
         const sheetNameToUse =
@@ -213,6 +214,7 @@ async function processEmailWithRetry({
   lead,
   email,
   sheetName,
+  sheetNameForPartnership,
   runContext,
   maxRetries = 3,
   autoAppend,
@@ -242,6 +244,7 @@ async function processEmailWithRetry({
       processed = await processEmailRow({
         emailRow: row,
         sheetName,
+         sheetNameForPartnership,
         additionalContext: {
           ClientID: lead.id || "N/A",
           Category: lead.category || "Uncategorized",

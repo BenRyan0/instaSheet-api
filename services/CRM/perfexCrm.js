@@ -27,7 +27,7 @@ async function postAfterEncoding(args) {
     tags,
     title: "",
     email: rowJson["lead email"] || "",
-    website: rowJson.details || "",
+    website: additionalContext.website || "",
     phonenumber: rowJson["company phone#"] || "",
     company: rowJson.company || "",
     address: rowJson.address || "",
@@ -36,7 +36,7 @@ async function postAfterEncoding(args) {
     state: rowJson.state || "",
     country: "",
     default_language: "",
-    description: rowJson["email reply"] || "",
+    description: rowJson["details"] || rowJson["email reply"] || "",
     custom_contact_date: "",
     is_public: sheetUrl || "",
   };

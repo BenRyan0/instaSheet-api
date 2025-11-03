@@ -30,6 +30,7 @@ class webhookController {
   async encodeInterestedRepliesByWebhook({
   opts,
   sheetName,
+  sheetNameForPartnership,
   autoAppend,
   descriptionExtraction
 }) {
@@ -110,6 +111,7 @@ class webhookController {
             lead,
             email,
             sheetName,
+            sheetNameForPartnership,
             runContext: runCtx,
             autoAppend,
             descriptionExtraction

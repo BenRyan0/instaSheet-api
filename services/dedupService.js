@@ -119,20 +119,18 @@ async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
   }
 }
 
-async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
+async function filterNewLeads(leads, processed, sheetNameForPartnership, sheetName, spreadsheetId) {
   const newLeads = [];
-  let errorOccurred = false;
+  const errors = [];
 
   for (const lead of leads) {
     const key = lead.email?.toLowerCase().trim();
-
-    // Skip leads with no email
     if (!key) {
       newLeads.push(lead);
       continue;
     }
 
-    // Skip already processed emails
+    // Step 1: Check in-memory deduplication
     if (processed.has(key)) {
       console.log(
         colorize("[dedup]", "lightBlue"),
@@ -144,14 +142,10 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
     }
 
     try {
-      const { exists } = await checkLeadEmailExists(
-        key,
-        sheetName,
-        spreadsheetId
-      );
+      // Step 2: Check in the main sheet
+      const { exists: existsInMain } = await checkLeadEmailExists(key, sheetName, spreadsheetId);
 
-      if (exists) {
-        // Email already in sheet — not an error, just skip
+      if (existsInMain) {
         console.log(
           colorize("[sheet-dup]", "lightYellow"),
           "email:",
@@ -160,33 +154,120 @@ async function filterNewLeads(leads, processed, sheetName, spreadsheetId) {
           colorize(`${sheetName}`, "green")
         );
         continue;
-      } else {
-        // Email not found — this is *OK*, it's a new lead
-        console.log(
-          colorize("[ LEAD OK ]", "green"),
-          "email=",
-          colorize(`${key}`, "lightCyan"),
-          "does NOT exist in sheet",
-          colorize(`${sheetName}`, "green")
-        );
       }
+
+      // Step 3: Check in the partnership sheet (if not found in main)
+      const { exists: existsInPartnership } = await checkLeadEmailExists(
+        key,
+        sheetNameForPartnership,
+        spreadsheetId
+      );
+
+      if (existsInPartnership) {
+        console.log(
+          colorize("[sheet-dup-2]", "lightYellow"),
+          "email:",
+          colorize(`${key}`, "lightCyan"),
+          "already exists in partnership sheet",
+          colorize(`${sheetNameForPartnership}`, "green")
+        );
+        continue;
+      }
+
+      // Step 4: If not found anywhere, it's a new lead
+      console.log(
+        colorize("[ LEAD OK ]", "green"),
+        "email=",
+        colorize(`${key}`, "lightCyan"),
+        "does NOT exist in either sheet",
+        colorize(`${sheetName} / ${sheetNameForPartnership}`, "green")
+      );
+
+      newLeads.push(lead);
+      processed.add(key); //add to dedup cache
+
     } catch (err) {
-      // Only real exceptions are errors (e.g., API failure)
       console.error(
         colorize("[error]", "bgRed"),
         `Error checking email=${key}:`,
         err.message
       );
-      errorOccurred = true;
-      break; // stop the loop if a real error occurs
+      errors.push({ email: key, message: err.message });
+      continue; // skip lead but keep processing others
     }
-
-    // Add only new (non-duplicate) leads
-    newLeads.push(lead);
   }
 
-  return { newLeads, error: errorOccurred };
+  return { newLeads, errors, errorOccurred: errors.length > 0 };
 }
+
+// async function filterNewLeads(leads, processed, sheetNameForPartnership, sheetName, spreadsheetId) {
+//   const newLeads = [];
+//   let errorOccurred = false;
+
+//   for (const lead of leads) {
+//     const key = lead.email?.toLowerCase().trim();
+
+//     // Skip leads with no email
+//     if (!key) {
+//       newLeads.push(lead);
+//       continue;
+//     }
+
+//     // Skip already processed emails
+//     if (processed.has(key)) {
+//       console.log(
+//         colorize("[dedup]", "lightBlue"),
+//         `already processed email:`,
+//         colorize(`${key}`, "lightBlue"),
+//         colorize("𝓡𝓮𝓭𝓲𝓼", "red")
+//       );
+//       continue;
+//     }
+
+//     try {
+//       const { exists } = await checkLeadEmailExists(
+//         key,
+//         sheetName,
+//         spreadsheetId
+//       );
+
+//       if (exists) {
+//         // Email already in sheet — not an error, just skip
+//         console.log(
+//           colorize("[sheet-dup]", "lightYellow"),
+//           "email:",
+//           colorize(`${key}`, "lightCyan"),
+//           "already exists in sheet",
+//           colorize(`${sheetName}`, "green")
+//         );
+//         continue;
+//       } else {
+//         // Email not found — this is *OK*, it's a new lead
+//         console.log(
+//           colorize("[ LEAD OK ]", "green"),
+//           "email=",
+//           colorize(`${key}`, "lightCyan"),
+//           "does NOT exist in sheet",
+//           colorize(`${sheetName}`, "green")
+//         );
+//       }
+//     } catch (err) {
+//       // Only real exceptions are errors (e.g., API failure)
+//       console.error(
+//         colorize("[error]", "bgRed"),
+//         `Error checking email=${key}:`,
+//         err.message
+//       );
+//       errorOccurred = true;
+//       break; // stop the loop if a real error occurs
+//     }
+
+//     // Add only new (non-duplicate) leads
+//     newLeads.push(lead);
+//   }
+
+//   return { newLeads, error: errorOccurred };
+// }
 
 module.exports = {
   normalizeKey,

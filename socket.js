@@ -110,9 +110,13 @@ const init = (server, options = {}) => {
           aiInterestThreshold: 1,
         };
 
+        console.log("payload")
+        console.log(payload)
+
         await webhookController.encodeInterestedRepliesByWebhook({
           opts,
-          sheetName: payload.sheetName || "MCA Loan Recent Copy",
+          sheetName: payload.sheetName || "MCA Loan",
+          sheetNameForPartnership: payload.sheetNameForPartnership || "Parnter MCA",
           autoAppend: true,
           descriptionExtraction: true,
         });

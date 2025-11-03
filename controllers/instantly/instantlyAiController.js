@@ -28,10 +28,7 @@ const {
 } = require("../../services/instantly/lead/replyService");
 const { colorize } = require("../../utils/colorLogger");
 
-
 class instantlyAiController {
-  
-
   // main method for manual processing of the lead replies
   // those email replies that were not encoded the day it was set as interested
   getInterestedRepliesOnly_ = async (req, res) => {
@@ -39,21 +36,28 @@ class instantlyAiController {
       // req paramaters
       // sheetName is the name of the sheet that the interested leads will be appended on
       // opts can have these values
-        //  "is_unread": true, Selecting only the emmails that was not read
-        //   "delayMs": 300, delay per request in fetching the leads
-        //   "pageLimit": 10, amount or nummber of leads per request
-        //   "emailsPerLead": 1, emails to get per email
-        //   "maxEmails": 20, maximumm emails to process, if reached the loop will stop
-        //   "maxPages": 10, maximumm pages to process, if reached the loop will stop
-        //   "aiInterestThreshold": 1 ai threshold in fetching the leads
+      //  "is_unread": true, Selecting only the emmails that was not read
+      //   "delayMs": 300, delay per request in fetching the leads
+      //   "pageLimit": 10, amount or nummber of leads per request
+      //   "emailsPerLead": 1, emails to get per email
+      //   "maxEmails": 20, maximumm emails to process, if reached the loop will stop
+      //   "maxPages": 10, maximumm pages to process, if reached the loop will stop
+      //   "aiInterestThreshold": 1 ai threshold in fetching the leads
 
-      const { opts, sheetName, autoAppend, descriptionExtraction } = req.body;
-      if(!opts || !sheetName){
-        return responseReturn(res, 400, {error : "SheetName and Options is required"})
+      const {
+        opts,
+        sheetName,
+        sheetNameForPartnership,
+        autoAppend,
+        descriptionExtraction,
+      } = req.body;
+      if (!opts || !sheetName || !sheetNameForPartnership) {
+        return responseReturn(res, 400, {
+          error: "SheetName or interested leads and for partnership and Options is required",
+        });
       }
 
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
-
 
       // redis database prerequisites
       // the text as identifier of the emails
@@ -75,7 +79,7 @@ class instantlyAiController {
       });
 
       // emmiting the current progress via socket
-      emitProgress({ctx:state});
+      emitProgress({ ctx: state });
       let cursor = null;
 
       // while loop -> checks first if the thresholds has not been reached yet
@@ -83,7 +87,7 @@ class instantlyAiController {
         // appending +1 of the pages that is fetched
         state.nextPage();
 
-        // fetching the lead's details 
+        // fetching the lead's details
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
           cursor,
           opts,
@@ -92,17 +96,23 @@ class instantlyAiController {
         });
 
         // sets the next cursor for the next request
-        // cursor is based on the page limit to prevent fething the same page 
+        // cursor is based on the page limit to prevent fething the same page
         cursor = nextCursor;
 
-        //Distination Sheet ID (not the sheet to append the replies) 
-        const spreadsheetId = env.SPREADSHEET_ID
+        //Distination Sheet ID (not the sheet to append the replies)
+        const spreadsheetId = env.SPREADSHEET_ID;
 
         // filtering the new and upprocessed leads
-        // setting it to processed after gets done 
+        // setting it to processed after gets done
         // returns an array of the unprocessed leads
-        const {newLeads,error} = await filterNewLeads(leads, seen, sheetName, spreadsheetId);
-        console.log(colorize(`[ lead count ${newLeads.length}]`,"lightCyan"))
+        const { newLeads, error } = await filterNewLeads(
+          leads,
+          seen,
+          sheetName,
+          sheetNameForPartnership,
+          spreadsheetId
+        );
+        console.log(colorize(`[ lead count ${newLeads.length}]`, "lightCyan"));
         if (!newLeads.length) continue;
 
         // each item of the array one by one
@@ -121,7 +131,7 @@ class instantlyAiController {
             runContext: runCtx,
           });
 
-          // Processing each emails fetched 
+          // Processing each emails fetched
           for (const email of interestedEmails) {
             // Checking if any errors has occurred
             if (runCtx.errorOccurred) break;
@@ -133,7 +143,7 @@ class instantlyAiController {
               sheetName,
               runContext: runCtx,
               autoAppend,
-              descriptionExtraction
+              descriptionExtraction,
             });
 
             // if the process was done and no errors has occured set the lead email as processed
@@ -143,7 +153,7 @@ class instantlyAiController {
             }
           }
 
-          emitProgress({ctx:state,show:false});
+          emitProgress({ ctx: state, show: false });
         }
       }
 

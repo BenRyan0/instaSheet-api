@@ -162,8 +162,8 @@ async function mapToSheetRow({
   setErrorContext,
 }) {
   try {
-    console.log(colorize("LEAD", "cyan"), lead);
-    console.log(colorize("EMAIL", "cyan"), email);
+    // console.log(colorize("LEAD", "cyan"), lead);
+    // console.log(colorize("EMAIL", "cyan"), email);
     const emailBodyText = email?.body?.text || "";
 
     // Step 1: Validate email body

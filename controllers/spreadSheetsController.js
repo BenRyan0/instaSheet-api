@@ -1,7 +1,7 @@
 const { initGoogleClients } = require("../services/googleClient.js");
 const { responseReturn } = require("../utils/response.js");
 
-class cardController {
+class spreadSheetsController {
   getAllSheets = async (req, res) => {
     try {
       const { sheets } = await initGoogleClients();
@@ -124,4 +124,4 @@ class cardController {
   };
 }
 
-module.exports = new cardController();
+module.exports = new spreadSheetsController();

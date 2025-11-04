@@ -120,6 +120,7 @@ async function processEmailRow({
           }
         }
 
+        
         await encodeToSheet(
           spreadsheetId,
           (sheetName = sheetNameToUse),

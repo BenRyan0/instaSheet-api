@@ -28,6 +28,13 @@ function initState({
     totalInterestedLLM: 0,
     totalToBeApproved: 0,
 
+    addTotalFetchedLeads(count) {
+      // simpler: increment directly
+      this.totalEmailsCollected += count;
+
+      console.log(`Total Emails Collected: ${this.totalEmailsCollected}`);
+    },
+
     // Call this once per page fetched.
     nextPage() {
       this.pagesFetched++;

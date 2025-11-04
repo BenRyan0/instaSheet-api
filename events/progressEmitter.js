@@ -17,19 +17,25 @@ function buildProgressState({
   totalInterestedLLM = 0,
 }) {
  // Avoid divide-by-zero
-  const emailProgress = maxEmailsCap
-    ? (totalEmailsCollected / maxEmailsCap) * 100
-    : 0;
+ const percentComplete = (() => {
+  const emailRatio = totalEmailsCollected / (maxEmailsCap || 1);
+  const pageRatio = pagesFetched / (maxPagesCap || 1);
 
-  const pageProgress = maxPagesCap
-    ? (pagesFetched / maxPagesCap) * 100
-    : 0;
+  // If the loop has naturally ended or caps are reached, force 100%
+  if (
+    pagesFetched >= maxPagesCap ||
+    totalEmailsCollected >= maxEmailsCap ||
+    stoppedEarly
+  ) {
+    return 100;
+  }
 
-  // Blend both metrics equally (50/50 weighting)
-  const percentComplete = Math.min(
-    100,
-    Math.round((emailProgress + pageProgress) / 2)
-  );
+  // Otherwise compute blended progress
+  const blended = Math.min(1, (emailRatio + pageRatio) / 2);
+  return Math.round(blended * 100);
+})();
+
+
 
   return {
     pagesFetched,

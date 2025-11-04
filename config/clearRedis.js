@@ -48,9 +48,5 @@ async function clearRedisData() {
   }
 }
 
-// Run directly if executed from CLI
-if (require.main === module) {
-  clearRedisData();
-}
 
 module.exports = clearRedisData;

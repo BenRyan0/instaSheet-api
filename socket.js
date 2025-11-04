@@ -116,7 +116,7 @@ const init = (server, options = {}) => {
         await webhookController.encodeInterestedRepliesByWebhook({
           opts,
           sheetName: payload.sheetName || "MCA Loan",
-          sheetNameForPartnership: payload.sheetNameForPartnership || "Parnter MCA",
+          sheetNameForPartnership: payload.sheetNameForPartnership || "Partner MCA",
           autoAppend: true,
           descriptionExtraction: true,
         });

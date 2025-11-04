@@ -27,6 +27,9 @@ const {
   getInterestedReplies,
 } = require("../../services/instantly/lead/replyService");
 const { colorize } = require("../../utils/colorLogger");
+const {
+  incrementTotalFetchedLeads,
+} = require("../../services/instantly/lead/encodeService");
 
 class instantlyAiController {
   // main method for manual processing of the lead replies
@@ -53,9 +56,13 @@ class instantlyAiController {
       } = req.body;
       if (!opts || !sheetName || !sheetNameForPartnership) {
         return responseReturn(res, 400, {
-          error: "SheetName or interested leads and for partnership and Options is required",
+          error:
+            "SheetName or interested leads and for partnership and Options is required",
         });
       }
+
+      console.log(req.body);
+      console.log("req.body");
 
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
       let i = 0;
@@ -85,10 +92,9 @@ class instantlyAiController {
 
       // while loop -> checks first if the thresholds has not been reached yet
       while (shouldContinue(state) && !runCtx.errorOccurred) {
-    
         // appending +1 of the pages that is fetched
         state.nextPage();
-       
+        emitProgress({ ctx: state, show: false });
 
         // fetching the lead's details
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
@@ -97,6 +103,8 @@ class instantlyAiController {
           authHeaders,
           runContext: runCtx,
         });
+
+        state.addTotalFetchedLeads(leads.length);
 
         // sets the next cursor for the next request
         // cursor is based on the page limit to prevent fething the same page
@@ -121,13 +129,9 @@ class instantlyAiController {
         // each item of the array one by one
         for (const lead of newLeads) {
           // appending +1 to the total of leads processed
-          i++
-          console.log("---------------------------------------------- state")
-          console.log(i)
+
           state.nextLead();
-          console.log("state")
-          console.log(state)
-     
+          emitProgress({ ctx: state, show: false });
 
           // fetching the email replies of the leads
           const interestedEmails = await getInterestedReplies({
@@ -150,6 +154,7 @@ class instantlyAiController {
               lead,
               email,
               sheetName,
+              sheetNameForPartnership,
               runContext: runCtx,
               autoAppend,
               descriptionExtraction,
@@ -162,14 +167,20 @@ class instantlyAiController {
             }
           }
 
-        //     console.log("state")
-        // console.log(state)
+          //     console.log("state")
+          // console.log(state)
           emitProgress({ ctx: state, show: false });
         }
       }
 
+      emitProgress({ ctx: state, show: false });
+
+      console.log(state);
+      console.log("state");
+
       const summary = summarizeState(state);
       await loggerController.addNewLog(summary);
+      await incrementTotalFetchedLeads(state.totalEmailsCollected);
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);

@@ -38,7 +38,7 @@ app.use(bodyParser.json());
 
 // Routes
 app.use("/api", require("./routes/authRoutes"));
-app.use("/api", require("./routes/spreedSheetRoutes"));
+app.use("/api", require("./routes/spreadSheetRoutes"));
 app.use("/api", require("./routes/isUsBasedRoutes"));
 app.use("/api", require("./routes/instantlyAiRoutes"));
 app.use("/api", require("./routes/loggerRoutes"));

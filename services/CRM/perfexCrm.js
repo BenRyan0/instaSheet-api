@@ -88,7 +88,7 @@ async function postAfterEncoding(args) {
 async function incrementAppendedToCRMLeads() {
   try {
     // Use the current date (YYYY-MM-DD)
-    const appended_date = new Date().toISOString().split("T")[0];
+    const appended_date = ((d => `${d[2]}-${d[0].padStart(2,"0")}-${d[1].padStart(2,"0")}`)(new Date().toLocaleString("en-PH",{timeZone:"Asia/Manila"}).split(",")[0].split("/")));
 
     // Upsert logic: insert if not exists, else increment count
     await con.query(

@@ -6,7 +6,6 @@ const { responseReturn } = require("../../../utils/response.js");
 const { postAfterEncoding } = require("../../CRM/perfexCrm");
 const { colorize } = require("../../../utils/colorLogger.js");
 
-
 async function getSheetMetadata(sheets, spreadsheetId, sheetName) {
   try {
     const meta = await sheets.spreadsheets.get({ spreadsheetId });
@@ -23,7 +22,13 @@ async function getSheetMetadata(sheets, spreadsheetId, sheetName) {
   }
 }
 
-async function ensureSheetAndHeaders(sheets, spreadsheetId, sheetName, rowJson, metaData) {
+async function ensureSheetAndHeaders(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  rowJson,
+  metaData
+) {
   const { existingTabs, targetSheet } = metaData;
 
   if (!existingTabs.includes(sheetName)) {
@@ -94,20 +99,31 @@ function checkForDuplicates(allValues, headers, rowJson, sheetName) {
   const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
   if (existingLeadEmails.has(newLeadEmail)) {
-    console.log(colorize("[skip]", "lightGreen"),` lead email "${newLeadEmail}" already exists in "${sheetName}"`);
+    console.log(
+      colorize("[skip]", "lightGreen"),
+      ` lead email "${newLeadEmail}" already exists in "${sheetName}"`
+    );
     return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
   const pairKey = `${newLeadEmail}|${newEmailReply}`;
   if (existingPairs.has(pairKey)) {
-    console.log(colorize("[skip]", "lightGreen"),` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
+    console.log(
+      colorize("[skip]", "lightGreen"),
+      ` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+    );
     return { duplicate: true, reason: "duplicate-lead-email" };
   }
 
   return { duplicate: false };
 }
 
-async function confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, fallbackFn) {
+async function confirmAppendIfNeeded(
+  autoAppend,
+  rowJson,
+  additionalContext,
+  fallbackFn
+) {
   if (autoAppend) {
     console.log(`[auto-append] Skipping confirmation`);
     return true;
@@ -148,7 +164,13 @@ async function confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, fal
   return true;
 }
 
-async function appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson) {
+async function appendRowToSheet(
+  sheets,
+  spreadsheetId,
+  sheetName,
+  headers,
+  rowJson
+) {
   const rowValues = headers.map((h) => rowJson[h] ?? "");
   return await sheets.spreadsheets.values.append({
     spreadsheetId,
@@ -168,11 +190,11 @@ async function encodeToSheet(
   setErrorOccurred,
   setErrorContext,
   addTotalToBeApproved,
-  autoAppend,
+  autoAppend
 ) {
   const { sheets } = await initGoogleClients();
-
-
+console.log("sheetName")
+console.log(sheetName)
   // STEP 1: Access sheet or fallback
   const metaData = await getSheetMetadata(sheets, spreadsheetId, sheetName);
   if (!metaData) {
@@ -202,24 +224,34 @@ async function encodeToSheet(
   const dupCheck = checkForDuplicates(allValues, headers, rowJson, sheetName);
   if (dupCheck.duplicate) return { success: false, reason: dupCheck.reason };
 
-
   // STEP 4: Confirmation or auto-append
-  const proceed = await confirmAppendIfNeeded(autoAppend, rowJson, additionalContext, async () => {
-    await appendToLeadDatabase({
-      rowJson,
-      additionalContext,
-      setErrorOccurred,
-      setErrorContext,
-      addTotalToBeApproved,
-      spreadsheetId,
-      sheetName,
-    });
-  });
+  const proceed = await confirmAppendIfNeeded(
+    autoAppend,
+    rowJson,
+    additionalContext,
+    async () => {
+      await appendToLeadDatabase({
+        rowJson,
+        additionalContext,
+        setErrorOccurred,
+        setErrorContext,
+        addTotalToBeApproved,
+        spreadsheetId,
+        sheetName,
+      });
+    }
+  );
 
   if (!proceed) return false;
 
   // STEP 5: Append row
-  const appendResp = await appendRowToSheet(sheets, spreadsheetId, sheetName, headers, rowJson);
+  const appendResp = await appendRowToSheet(
+    sheets,
+    spreadsheetId,
+    sheetName,
+    headers,
+    rowJson
+  );
   console.log(`Appended row to "${sheetName}"`);
   await incrementApprovedEncodingLead();
 
@@ -228,7 +260,7 @@ async function encodeToSheet(
   // STEP 6: Post-processing
   const nextRow = allValues.length + 1;
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetId}&range=A${nextRow}`;
-  
+
   await postAfterEncoding({
     rowJson,
     sheetUrl,
@@ -262,8 +294,7 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
         return {
           status: "error",
           reason: "spreadsheet-not-found",
-          details:
-            "The spreadsheet ID may be incorrect or deleted.",
+          details: "The spreadsheet ID may be incorrect or deleted.",
         };
       } else if (authErr.message?.includes("violates our Terms")) {
         return {
@@ -289,7 +320,9 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
       return {
         status: "warning",
         reason: "sheet-tab-missing",
-        details: `Sheet tab "${sheetName}" not found in spreadsheet. Available sheets: ${sheetTitles.join(", ")}`,
+        details: `Sheet tab "${sheetName}" not found in spreadsheet. Available sheets: ${sheetTitles.join(
+          ", "
+        )}`,
       };
     }
 
@@ -314,7 +347,9 @@ async function diagnoseGoogleSheetAccess(spreadsheetId, sheetName) {
     return {
       status: "ok",
       reason: "sheet-accessible",
-      details: `Service account can access and read from sheet${sheetName ? ` "${sheetName}"` : ""}.`,
+      details: `Service account can access and read from sheet${
+        sheetName ? ` "${sheetName}"` : ""
+      }.`,
     };
   } catch (err) {
     return {
@@ -339,7 +374,8 @@ async function appendToLeadDatabase({
   if (!rowJson) {
     const error = new Error("Missing rowJson input.");
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`appendToLeadDatabase: ${error.message}`);
+    if (setErrorContext)
+      setErrorContext(`appendToLeadDatabase: ${error.message}`);
     console.error(error.message);
     throw error;
   }
@@ -426,7 +462,8 @@ async function appendToLeadDatabase({
   } catch (error) {
     console.error("Error inserting lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`AppendToLeadDatabase: ${error.message}`);
+    if (setErrorContext)
+      setErrorContext(`AppendToLeadDatabase: ${error.message}`);
     throw error;
   }
 }
@@ -546,13 +583,19 @@ async function encodeLeadFromRequest({
     const newEmailReply = (rowJson["email reply"] || "").toLowerCase().trim();
 
     if (existingLeadEmails.has(newLeadEmail)) {
-      console.log(colorize("[skip]", "lightGreen"),` lead email "${newLeadEmail}" already exists in "${sheetName}"`);
+      console.log(
+        colorize("[skip]", "lightGreen"),
+        ` lead email "${newLeadEmail}" already exists in "${sheetName}"`
+      );
       return { success: false, reason: "duplicate-lead-email" };
     }
 
     const pairKey = `${newLeadEmail}|${newEmailReply}`;
     if (existingPairs.has(pairKey)) {
-      console.log(colorize("[skip]", "lightGreen"),` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`);
+      console.log(
+        colorize("[skip]", "lightGreen"),
+        ` row for lead="${newLeadEmail}" & reply="${newEmailReply}" already exists`
+      );
       return { success: false, reason: "duplicate-lead+reply" };
     }
 
@@ -582,8 +625,6 @@ async function encodeLeadFromRequest({
       console.log(`Lead ID ${leadData.id} marked as done.`);
     }
 
- 
-
     const additionalContext = {
       ClientID: leadData.clientid,
       Category: leadData.tags,
@@ -597,28 +638,24 @@ async function encodeLeadFromRequest({
       setErrorContext,
     });
 
-
-
-
-    
     // 8️ Post-processing
 
-       await incrementApprovedEncodingLead();
+    await incrementApprovedEncodingLead();
 
     // Return both success and sheetUrl
     return { success: true, sheetUrl };
   } catch (error) {
     console.error("Error encoding lead:", error.message);
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`encodeLeadFromRequest: ${error.message}`);
+    if (setErrorContext)
+      setErrorContext(`encodeLeadFromRequest: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
 
 async function incrementApprovedEncodingLead() {
   try {
-    // Extract only the date part (YYYY-MM-DD)
-    const approvalDate = new Date().toISOString().split("T")[0];
+    const approvalDate = ((d => `${d[2]}-${d[0].padStart(2,"0")}-${d[1].padStart(2,"0")}`)(new Date().toLocaleString("en-PH",{timeZone:"Asia/Manila"}).split(",")[0].split("/")));
     // const approvalDate = new Date(createdAt).toISOString().split("T")[0];
 
     // Upsert logic: insert if not exists, else increment count
@@ -640,8 +677,7 @@ async function incrementApprovedEncodingLead() {
 
 async function incrementFetchedInterestedLead() {
   try {
-    // Use the current date (YYYY-MM-DD)
-    const date_fetched = new Date().toISOString().split("T")[0];
+    const date_fetched = ((d => `${d[2]}-${d[0].padStart(2,"0")}-${d[1].padStart(2,"0")}`)(new Date().toLocaleString("en-PH",{timeZone:"Asia/Manila"}).split(",")[0].split("/")));
 
     // Upsert logic: insert if not exists, else increment count
     await con.query(
@@ -659,26 +695,32 @@ async function incrementFetchedInterestedLead() {
     console.error("Error updating fetched_interested_lead:", err.message);
   }
 }
+async function incrementTotalFetchedLeads(count) {
+  if (typeof count !== "number" || count <= 0) {
+    console.warn("Invalid count value:", count);
+    return;
+  }
 
-async function incrementAppendedToCRMLeads() {
+  const date_fetched =((d => `${d[2]}-${d[0].padStart(2,"0")}-${d[1].padStart(2,"0")}`)(new Date().toLocaleString("en-PH",{timeZone:"Asia/Manila"}).split(",")[0].split("/")));
+
   try {
-    // Use the current date (YYYY-MM-DD)
-    const appended_date = new Date().toISOString().split("T")[0];
-
-    // Upsert logic: insert if not exists, else increment count
-    await con.query(
+    const result = await con.query(
       `
-      INSERT INTO appended_to_crm (appended_date, appended_count)
-      VALUES ($1, 1)
-      ON CONFLICT (appended_date)
-      DO UPDATE SET appended_count = appended_to_crm.appended_count + 1
+      INSERT INTO fetched_leads (date_fetched, fetched_count)
+      VALUES ($1, $2)
+      ON CONFLICT (date_fetched)
+      DO UPDATE SET fetched_count = fetched_leads.fetched_count + EXCLUDED.fetched_count
+      RETURNING fetched_count;
       `,
-      [appended_date]
+      [date_fetched, count]
     );
 
-    console.log(`Appended to CRM count updated for ${appended_date}`);
+    console.log(
+      `Updated fetched_leads for ${date_fetched}: total = ${result.rows[0].fetched_count}`
+    );
+    return result.rows[0].fetched_count;
   } catch (err) {
-    console.error("Error updating appended_to_crm:", err.message);
+    console.error("Error updating Total Fetched lead:", err.message);
   }
 }
 
@@ -717,5 +759,6 @@ module.exports = {
   encodeLeadFromRequest,
   markToBeApprovedLead,
   diagnoseGoogleSheetAccess,
-  incrementFetchedInterestedLead
+  incrementFetchedInterestedLead,
+  incrementTotalFetchedLeads,
 };

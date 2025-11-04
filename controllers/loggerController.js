@@ -53,18 +53,40 @@ class loggerController {
     console.log("GET ALL LOGS");
     try {
       const query = `
-     SELECT 
-        COALESCE(a.approval_date, f.date_fetched, c.appended_date) AS date,
-        COALESCE(a.approved_count, 0) AS approved,
-        COALESCE(f.fetched_count, 0) AS fetched,
-        COALESCE(c.appended_count, 0) AS appended
-      FROM approved_encoding_lead a
-      FULL OUTER JOIN fetched_interested_lead f
-        ON a.approval_date = f.date_fetched
-      FULL OUTER JOIN appended_to_crm c
-        ON COALESCE(a.approval_date, f.date_fetched) = c.appended_date
-      ORDER BY date;
-
+          SELECT 
+          COALESCE(date, date_total) AS date,
+          COALESCE(approved, 0) AS approved,
+          COALESCE(fetched, 0) AS fetched,
+          COALESCE(appended, 0) AS appended,
+          COALESCE(total_fetched, 0) AS total_fetched
+        FROM (
+          -- Main combined data (approved, fetched_interested, appended)
+          SELECT 
+            date,
+            SUM(approved) AS approved,
+            SUM(fetched) AS fetched,
+            SUM(appended) AS appended
+          FROM (
+            SELECT approval_date AS date, approved_count AS approved, 0 AS fetched, 0 AS appended
+            FROM approved_encoding_lead
+            UNION ALL
+            SELECT date_fetched AS date, 0, fetched_count, 0
+            FROM fetched_interested_lead
+            UNION ALL
+            SELECT appended_date AS date, 0, 0, appended_count
+            FROM appended_to_crm
+          ) AS base
+          GROUP BY date
+        ) AS combined
+        FULL OUTER JOIN (
+          -- Separate fetched_leads total
+          SELECT 
+            date_fetched AS date_total,
+            fetched_count AS total_fetched
+          FROM fetched_leads
+        ) AS totals
+        ON combined.date = totals.date_total
+        ORDER BY COALESCE(date, date_total);
     `;
 
       const result = await con.query(query);

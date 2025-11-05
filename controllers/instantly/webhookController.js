@@ -24,7 +24,9 @@ const {
 const { delay } = require("../../utils/helpers");
 const loggerController = require(".././loggerController");
 const { colorize } = require("../../utils/colorLogger");
-const { incrementTotalFetchedLeads } = require("../../services/instantly/lead/encodeService");
+const {
+  incrementTotalFetchedLeads,
+} = require("../../services/instantly/lead/encodeService");
 
 class webhookController {
   // LEAD PROCESSING FROM WEB HOOK
@@ -44,23 +46,25 @@ class webhookController {
       const seen = new Set(seenMembers);
 
       // Context and state
-      const runCtx = createRunContext();
-      const state = initState({
+      // const runCtx = createRunContext();
+
+   const state = initState({
         initialSeenCount: seen.size,
         maxEmails: opts.maxEmails,
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
+        runId: "webSocketRunID",
       });
 
       let errorBatchCount = 0;
       let noLeadsBatchCount = 0; // <-- NEW: counts consecutive empty lead fetches
 
-      while (shouldContinue(state) && !runCtx.errorOccurred) {
+      while (shouldContinue(state)) {
         // Fetch & normalize leads from webhook
         const leads = await fetchAndNormalizeLeadsWebhook({
           opts,
           authHeaders,
-          runContext: runCtx,
+          runContext: state,
         });
         state.addTotalFetchedLeads(leads.length);
 
@@ -87,7 +91,10 @@ class webhookController {
           seen,
           sheetName,
           sheetNameForPartnership,
-          spreadsheetId
+          spreadsheetId,
+           {
+            state,
+          }
         );
 
         if (error) {
@@ -108,21 +115,22 @@ class webhookController {
             redisClient,
             dedupKey,
             seen,
-            runContext: runCtx,
+            runContext: state,
           });
 
           // Process each interested email
           for (const email of interestedEmails) {
-            if (runCtx.errorOccurred) break;
+            if (state.errorOccurred) break;
 
             const processed = await processEmailWithRetry({
               lead,
               email,
               sheetName,
               sheetNameForPartnership,
-              runContext: runCtx,
+              runContext: state,
               autoAppend,
               descriptionExtraction,
+              state
             });
 
             if (processed) {
@@ -135,7 +143,7 @@ class webhookController {
 
       const summary = summarizeState(state);
       await loggerController.addNewLog(summary);
-       await incrementTotalFetchedLeads(state.totalEmailsCollected)
+      await incrementTotalFetchedLeads(state.totalEmailsCollected);
       return summary;
     } catch (err) {
       console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);

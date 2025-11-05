@@ -538,7 +538,9 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
 
   if (!apiKeys.length) {
-    console.error("No OpenRouter API keys available → using rule-based fallback.");
+    console.error(
+      "No OpenRouter API keys available → using rule-based fallback."
+    );
     return ruleBasedCheck(text);
   }
 
@@ -550,7 +552,9 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
     const currentKey = apiKeys[keyIndex];
 
     console.log(
-      `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${keyIndex + 1})`
+      `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
+        keyIndex + 1
+      })`
     );
 
     try {
@@ -570,43 +574,43 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
               {
                 role: "system",
                 content: `
-                  You are an intelligent assistant that determines the *intent* of an email reply regarding a business funding offer.
+    You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
 
-                  ---
+    ---
 
-                  ### OFFER CONTEXT
-                  We provide **working capital or cash advances** to businesses based on their gross receipts.
-                  - Credit score does not affect eligibility.
-                  - Funding can be released within 24 hours.
+    ### OFFER CONTEXT
+    We help businesses access **working capital or merchant cash advances** based on their gross receipts — *not their credit score*. 
+    - Fast approval and same-day funding (often within 24 hours).  
+    - Designed for small and medium-sized businesses needing quick, flexible financing.  
+    - Simple qualification process with minimal documentation.
 
-                  ---
+    ---
 
-                  ### YOUR TASK
-                  Analyze the email reply and classify it based on what the sender seems **interested** in:
+    ### YOUR TASK
+    Read the email reply and identify what the sender is most likely interested in:
 
-                  1. **"offer"** → The sender is interested in or curious about the *funding offer* itself.
-                    - They ask for terms, summaries, or more info about funding.
-                    - They express willingness to talk, schedule a call, or proceed.
-                    - They refer you to someone who handles funding/finance decisions.
+    1. **"offer"** → The sender shows interest or curiosity about *our funding offer*.  
+       - They ask for terms, amounts, requirements, or next steps.  
+       - They request a call, meeting, or more information.  
+       - They forward or refer you to someone who handles financing.  
 
-                  2. **"partnership"** → The sender is interested in a *business collaboration or partnership*,
-                    not in the funding offer itself.
-                    - They mention working together, collaboration, cross-promotion, or other joint efforts.
-                    - They show intent to “partner up,” “team up,” or “cooperate.”
+    2. **"partnership"** → The sender is interested in *business collaboration* instead of funding.  
+       - They mention teaming up, cross-promotions, joint ventures, referrals, or lead-sharing.  
+       - They focus on cooperation or partnership opportunities rather than financing.  
 
-                  3. **"false"** → The sender is *not interested* in either the funding offer or a partnership.
-                    - They reject, unsubscribe, or express disinterest.
-                    - They ask for something unrelated (grants, jobs, donations, etc.).
-                    - The message is automated, non-human, or off-topic.
+    3. **"false"** → The sender is *not interested* in funding or partnership.  
+       - They reject, unsubscribe, or say they're not looking for funding.  
+       - They request unrelated help (grants, jobs, donations, etc.).  
+       - The message is automated, out-of-office, or irrelevant.  
 
-                  ---
+    ---
 
-                  ### RESPONSE FORMAT
-                  Respond **strictly** with one lowercase word:
-                  - "offer" → if interested in the funding offer  
-                  - "partnership" → if interested in collaboration/partnership  
-                  - "false" → if not interested or irrelevant
-                `,
+    ### RESPONSE FORMAT
+    Respond **only** with one lowercase word:
+    - "offer" → interested in funding  
+    - "partnership" → interested in collaboration  
+    - "false" → not interested or irrelevant
+  `,
               },
               { role: "user", content: text },
             ],
@@ -632,7 +636,8 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
         "";
 
       const normalizedOut =
-        (modelOut.match(/\b(offer|partnership|false)\b/i) || [])[1]?.toLowerCase() || "";
+        (modelOut.match(/\b(offer|partnership|false)\b/i) ||
+          [])[1]?.toLowerCase() || "";
 
       if (!normalizedOut) {
         console.warn(`Unexpected LLM output: "${modelOut}"`);
@@ -642,7 +647,8 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
       if (normalizedOut === "offer") {
         console.log("Classified as: OFFER (interested in funding offer)");
-        if (typeof addTotalInterestedLLM === "function") addTotalInterestedLLM(1);
+        if (typeof addTotalInterestedLLM === "function")
+          addTotalInterestedLLM(1);
         return { interested: true, type: "offer" };
       }
 
@@ -653,13 +659,15 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
       if (normalizedOut === "false") {
         console.log("Classified as: FALSE (not interested)");
-         return { interested: false, type: null };
+        return { interested: false, type: null };
       }
 
       console.warn(`Unrecognized classification output: "${modelOut}"`);
       return false;
     } catch (err) {
-      console.error(`Attempt #${attempt + 1} failed (${err.name}: ${err.message})`);
+      console.error(
+        `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
+      );
       attempt++;
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
@@ -670,7 +678,6 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
   return ruleResult;
 }
-
 
 // async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 //   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {

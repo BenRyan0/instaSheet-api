@@ -49,9 +49,6 @@ app.get("/", (req, res) => {
 });
 
 
-// (async () => {
-//   await clearRedisData();
-// })()
 
 server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

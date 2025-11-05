@@ -6,8 +6,9 @@ const SOCKET_LIMITS = {
 
 let io;
 // Use Maps for better memory management and O(1) lookups
-const activeSockets = new Map(); // Stores socket instances with metadata
-const userSockets = new Map(); // userId to socketId mapping
+const activeSockets = new Map(); // socket.id -> metadata
+const userSockets = new Map();   // userId -> socketId
+const activeClients = new Map(); // clientId -> socket
 
 const init = (server, options = {}) => {
   io = require("socket.io")(server, {
@@ -15,60 +16,38 @@ const init = (server, options = {}) => {
     pingTimeout: 60000,
     pingInterval: 25000,
     connectTimeout: 30000,
-    maxHttpBufferSize: 1e6, // 1MB
+    maxHttpBufferSize: 1e6,
   });
 
   io.on("connection", (socket) => {
-    // Check connection limit
-    if (activeSockets.size >= SOCKET_LIMITS.maxConnections) {
-      socket.emit('error', { message: 'Server connection limit reached' });
+    const { userId, clientId } = socket.handshake.auth;
+
+    if (!clientId) {
+      console.log("❌ Missing clientId — disconnecting");
       socket.disconnect(true);
       return;
     }
 
-    console.log(`New socket connected: ${socket.id}`);
-    
-    // Store socket metadata
-    const timeInterval = setInterval(() => {
-      socket.emit("message", new Date());
-    }, 3000);
-    
+    console.log(`🔌 Connected: user=${userId}, client=${clientId}, socket=${socket.id}`);
+
+    // Replace previous socket for same clientId if exists
+    const oldSocket = activeClients.get(clientId);
+    if (oldSocket && oldSocket.id !== socket.id) {
+      console.log(`♻️ Replacing old connection for clientId=${clientId}`);
+      oldSocket.disconnect(true);
+    }
+
+    activeClients.set(clientId, socket);
+    if (userId) userSockets.set(userId, socket.id);
+
+    // Store metadata
     activeSockets.set(socket.id, {
       socket,
-      connectedAt: Date.now(),
-      heartbeat: Date.now(),
-      intervals: new Set([timeInterval]),
+      userId,
+      clientId,
+      intervals: new Set(),
       timeouts: new Set(),
-      isProcessing: false
-    });
-
-    // Handle disconnection
-    socket.on("disconnect", () => {
-      console.log(`Disconnected: ${socket.id}`);
-      
-      // Clean up socket resources
-      const socketData = activeSockets.get(socket.id);
-      if (socketData) {
-        // Clear all intervals
-        for (const interval of socketData.intervals) {
-          clearInterval(interval);
-        }
-        // Clear all timeouts
-        for (const timeout of socketData.timeouts) {
-          clearTimeout(timeout);
-        }
-        // Remove socket data
-        activeSockets.delete(socket.id);
-      }
-
-      // Remove from userSockets mapping
-      for (const [userId, id] of userSockets.entries()) {
-        if (id === socket.id) {
-          userSockets.delete(userId);
-          console.log(`Removed ${userId} from active sockets.`);
-          break;
-        }
-      }
+      isProcessing: false,
     });
 
     const webhookController = require("./controllers/instantly/webhookController");
@@ -149,9 +128,12 @@ const getUserSocket = (userId) => {
   return null;
 };
 
+
+const getSocketByClientId = (clientId) => activeClients.get(clientId);
+
 // Associate user ID with socket
 const setUserSocket = (userId, socketId) => {
   userSockets.set(userId, socketId);
 };
 
-module.exports = { init, getIO, getUserSocket, setUserSocket };
+module.exports = { init, getIO, getUserSocket, setUserSocket, getSocketByClientId };

@@ -29,6 +29,7 @@ async function processEmailRow({
   addTotalEnterestedLLM,
   autoAppend,
   descriptionExtraction,
+  state
 }) {
   console.log(colorize("Processing lead Email ...", "blue"));
   const spreadsheetId = env.SPREADSHEET_ID;
@@ -64,6 +65,7 @@ async function processEmailRow({
       );
 
       if (interested) {
+        state.addTotalEnterestedLLM(1)
         const sheetNameForOffer = sheetName;
         await incrementFetchedInterestedLead()
         
@@ -159,6 +161,7 @@ async function processEmailRow({
       console.log("interested");
       console.log(interested);
       if (interested) {
+        state.addTotalEnterestedLLM(1)
         const sheetNameForOffer = sheetName;
          await incrementFetchedInterestedLead()
         // const sheetNameForPartnership = "Partner MCA";
@@ -224,6 +227,7 @@ async function processEmailWithRetry({
   maxRetries = 3,
   autoAppend,
   descriptionExtraction,
+  state
 }) {
   let row;
   try {
@@ -262,6 +266,7 @@ async function processEmailWithRetry({
         setErrorContext: runContext.setErrorContext,
         autoAppend,
         descriptionExtraction,
+        state
       });
 
       if (processed) break;

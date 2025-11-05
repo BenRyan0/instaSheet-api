@@ -53,11 +53,19 @@ class instantlyAiController {
         sheetNameForPartnership,
         autoAppend,
         descriptionExtraction,
+        clientId,
       } = req.body;
+      console.log(req.body);
       if (!opts || !sheetName || !sheetNameForPartnership) {
         return responseReturn(res, 400, {
           error:
             "SheetName or interested leads and for partnership and Options is required",
+        });
+      }
+      if (!clientId) {
+        return responseReturn(res, 400, {
+          error:
+            "Please do login, if already logged in kindly reload the webpage",
         });
       }
 
@@ -76,7 +84,13 @@ class instantlyAiController {
 
       // context container
       // contains how much is processed and  fetched
-      const runCtx = createRunContext();
+      const runCtx = createRunContext({
+        maxEmails: opts.maxEmails,
+        maxPages: opts.maxPages,
+        aiInterestThreshold: opts.aiInterestThreshold,
+      });
+      console.log("runCtx_START");
+      console.log(runCtx);
 
       // initialization of the container of the total processed and  fetched
       const state = initState({
@@ -84,17 +98,18 @@ class instantlyAiController {
         maxEmails: opts.maxEmails,
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
+        runId: runCtx.runId,
       });
 
       // emmiting the current progress via socket
-      emitProgress({ ctx: state });
+      emitProgress({ clientId, ctx: runCtx });
       let cursor = null;
 
       // while loop -> checks first if the thresholds has not been reached yet
-      while (shouldContinue(state) && !runCtx.errorOccurred) {
+      while (shouldContinue(runCtx) && !runCtx.errorOccurred) {
         // appending +1 of the pages that is fetched
-        state.nextPage();
-        emitProgress({ ctx: state, show: false });
+        runCtx.nextPage();
+        emitProgress({ clientId, ctx: runCtx, show: false });
 
         // fetching the lead's details
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
@@ -104,7 +119,7 @@ class instantlyAiController {
           runContext: runCtx,
         });
 
-        state.addTotalFetchedLeads(leads.length);
+        runCtx.addTotalFetchedLeads(leads.length);
 
         // sets the next cursor for the next request
         // cursor is based on the page limit to prevent fething the same page
@@ -130,8 +145,8 @@ class instantlyAiController {
         for (const lead of newLeads) {
           // appending +1 to the total of leads processed
 
-          state.nextLead();
-          emitProgress({ ctx: state, show: false });
+          runCtx.nextLead();
+          emitProgress({ clientId, ctx: runCtx, show: false });
 
           // fetching the email replies of the leads
           const interestedEmails = await getInterestedReplies({
@@ -158,6 +173,7 @@ class instantlyAiController {
               runContext: runCtx,
               autoAppend,
               descriptionExtraction,
+              state,
             });
 
             // if the process was done and no errors has occured set the lead email as processed
@@ -169,18 +185,21 @@ class instantlyAiController {
 
           //     console.log("state")
           // console.log(state)
-          emitProgress({ ctx: state, show: false });
+          emitProgress({ clientId, ctx: runCtx, show: false });
         }
       }
 
-      emitProgress({ ctx: state, show: false });
+      emitProgress({ clientId, ctx: runCtx, show: false });
 
-      console.log(state);
       console.log("state");
+      console.log(state);
 
-      const summary = summarizeState(state);
+      console.log("RUNCTX _END");
+      console.log(runCtx);
+
+      const summary = summarizeState(runCtx);
       await loggerController.addNewLog(summary);
-      await incrementTotalFetchedLeads(state.totalEmailsCollected);
+      await incrementTotalFetchedLeads(runCtx.totalEmailsCollected);
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);

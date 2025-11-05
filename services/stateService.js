@@ -1,15 +1,19 @@
+const crypto = require("crypto");
+
 // services/stateService.js
 function initState({
   initialSeenCount = 0,
   maxEmails,
   maxPages,
   aiInterestThreshold,
+  runId,
 }) {
   return {
     // Quantities we’ll mutate
     pagesFetched: 0,
     processedLeads: 0,
     totalEmailsCollected: 0,
+    unProcessedLeads: 0,
     // Collections to report
     rows: [],
     // Mirrors Redis set size; distinct leads we’ve checked
@@ -27,6 +31,18 @@ function initState({
     totalEncoded: 0,
     totalInterestedLLM: 0,
     totalToBeApproved: 0,
+    runId: runId,
+
+    setRunId(val) {
+      this.runId = val;
+    },
+
+    addTotalEnterestedLLM(val) {
+      this.totalInterestedLLM += val;
+    },
+    addTotalUnProcessedLeads(val) {
+      this.unProcessedLeads += val;
+    },
 
     addTotalFetchedLeads(count) {
       // simpler: increment directly
@@ -83,18 +99,61 @@ function shouldContinue(state) {
  */
 const activeRunContexts = new Map();
 
+function generateRunId() {
+  // Example: run-1730798620123-7f3a1c
+  return `run-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+}
+
 /**
  * Create a runtime context for a specific encoding run
  * Tracks progress, error states, and metrics.
  */
-function createRunContext(runId = "default") {
+function createRunContext({
+  runId = null,
+  maxEmails = 0,
+  maxPages = 0,
+  aiInterestThreshold = 1,
+}) {
+  const finalRunId = runId || generateRunId();
+
   const ctx = {
-    runId,
+    runId: finalRunId,
+    unProcessedLeads: 0,
     totalEncoded: 0,
     totalToBeApproved: 0,
-    totalEnterestedLLM: 0,
+    ctxTotalInterestedLLM: 0,
     errorOccurred: false,
     errorContext: "",
+    pagesFetched: 0,
+    totalEmailsCollected: 0,
+    processedLeads: 0,
+    distinctLeadsChecked: 0,
+    stoppedEarly: false,
+    maxEmails,
+    maxEmailsCap: maxEmails,
+    maxPages,
+    maxPagesCap: maxPages,
+    aiInterestThreshold,
+
+    addTotalUnProcessedLeads(val) {
+      this.unProcessedLeads += val;
+    },
+
+    nextLead() {
+      this.processedLeads++;
+      this.distinctLeadsChecked++;
+    },
+
+    addTotalFetchedLeads(count) {
+      // simpler: increment directly
+      this.totalEmailsCollected += count;
+
+      console.log(`Total Emails Collected: ${this.totalEmailsCollected}`);
+    },
+
+    nextPage() {
+      this.pagesFetched++;
+    },
 
     addToTotalEncoded(val) {
       this.totalEncoded += val;
@@ -105,7 +164,7 @@ function createRunContext(runId = "default") {
     },
 
     addTotalEnterestedLLM(val) {
-      this.totalEnterestedLLM += val;
+      this.ctxTotalInterestedLLM += val;
     },
 
     setErrorOccurred(val) {

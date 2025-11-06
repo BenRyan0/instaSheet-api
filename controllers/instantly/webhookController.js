@@ -27,6 +27,7 @@ const { colorize } = require("../../utils/colorLogger");
 const {
   incrementTotalFetchedLeads,
 } = require("../../services/instantly/lead/encodeService");
+const { flushLocalCacheToRedis } = require("../../services/Redis/flushToRedis");
 
 class webhookController {
   // LEAD PROCESSING FROM WEB HOOK
@@ -34,11 +35,13 @@ class webhookController {
     opts,
     sheetName,
     sheetNameForPartnership,
+    sheetNameForSBA,
     autoAppend,
     descriptionExtraction,
   }) {
     try {
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+      const spreadsheetId = env.SPREADSHEET_ID;
 
       // Initialize Redis de-duplication
       const dedupKey = `insta:processed_emails`;
@@ -48,7 +51,7 @@ class webhookController {
       // Context and state
       // const runCtx = createRunContext();
 
-   const state = initState({
+      const state = initState({
         initialSeenCount: seen.size,
         maxEmails: opts.maxEmails,
         maxPages: opts.maxPages,
@@ -85,19 +88,22 @@ class webhookController {
           noLeadsBatchCount = 0;
         }
 
-        const spreadsheetId = env.SPREADSHEET_ID;
+        const sheetNames = [
+          sheetName,
+          sheetNameForPartnership,
+          sheetNameForSBA,
+        ];
+
         const { newLeads, error } = await filterNewLeads(
           leads,
           seen,
-          sheetName,
-          sheetNameForPartnership,
           spreadsheetId,
-           {
-            state,
-          }
+          sheetNames
         );
 
-        if (error) {
+        if (Array.isArray(error) && error.length > 0) {
+          console.log("error");
+          console.log(error);
           errorBatchCount++;
           console.log(colorize(`(${errorBatchCount}/3)`, "bgLightRed"));
           if (errorBatchCount >= 3) break;
@@ -127,10 +133,11 @@ class webhookController {
               email,
               sheetName,
               sheetNameForPartnership,
+              sheetNameForSBA,
               runContext: state,
               autoAppend,
               descriptionExtraction,
-              state
+              state,
             });
 
             if (processed) {
@@ -144,6 +151,8 @@ class webhookController {
       const summary = summarizeState(state);
       await loggerController.addNewLog(summary);
       await incrementTotalFetchedLeads(state.totalEmailsCollected);
+
+      await flushLocalCacheToRedis(redisClient, dedupKey, seen);
       return summary;
     } catch (err) {
       console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);

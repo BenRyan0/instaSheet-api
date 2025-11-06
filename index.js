@@ -6,7 +6,7 @@ const bodyParser = require("body-parser");
 const { init: initSocket } = require("./socket"); 
 
 const env = require("./env");
-const clearRedisData = require("./config/clearRedis");
+// const clearRedisData = require("./config/clearRedis");
 const port = env.PORT || 3000;
 const server = http.createServer(app);
 

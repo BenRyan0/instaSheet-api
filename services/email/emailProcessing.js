@@ -21,6 +21,7 @@ async function processEmailRow({
   emailRow,
   sheetName,
   sheetNameForPartnership,
+  sheetNameForSBA,
   additionalContext,
   setErrorOccurred,
   setErrorContext,
@@ -29,7 +30,7 @@ async function processEmailRow({
   addTotalEnterestedLLM,
   autoAppend,
   descriptionExtraction,
-  state
+  state,
 }) {
   console.log(colorize("Processing lead Email ...", "blue"));
   const spreadsheetId = env.SPREADSHEET_ID;
@@ -65,15 +66,19 @@ async function processEmailRow({
       );
 
       if (interested) {
-        state.addTotalEnterestedLLM(1)
+        state.addTotalEnterestedLLM(1);
         const sheetNameForOffer = sheetName;
-        await incrementFetchedInterestedLead()
-        
+        await incrementFetchedInterestedLead();
+
         // const sheetNameForPartnership = "Partner MCA";
 
-        // Corrected logic: use the proper sheet based on the type
-        const sheetNameToUse =
-          type === "partnership" ? sheetNameForPartnership : sheetNameForOffer;
+        const sheetNameMap = {
+          partnership: sheetNameForPartnership,
+          sba: sheetNameForSBA,
+          offer: sheetNameForOffer,
+        };
+
+        const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
 
         console.log("-------- rowJson.details --------");
         console.log(rowJson.details);
@@ -122,7 +127,6 @@ async function processEmailRow({
           }
         }
 
-        
         await encodeToSheet(
           spreadsheetId,
           (sheetName = sheetNameToUse),
@@ -161,14 +165,20 @@ async function processEmailRow({
       console.log("interested");
       console.log(interested);
       if (interested) {
-        state.addTotalEnterestedLLM(1)
+        state.addTotalEnterestedLLM(1);
         const sheetNameForOffer = sheetName;
-         await incrementFetchedInterestedLead()
+        await incrementFetchedInterestedLead();
         // const sheetNameForPartnership = "Partner MCA";
 
-        // Corrected logic: use the proper sheet based on the type
-        const sheetNameToUse =
-          type === "partnership" ? sheetNameForPartnership : sheetNameForOffer;
+        
+        const sheetNameMap = {
+          partnership: sheetNameForPartnership,
+          sba: sheetNameForSBA,
+          offer: sheetNameForOffer,
+        };
+
+        const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+
         try {
           const descResult = await extractBusinessDescription({
             websiteUrl: rowJson.details,
@@ -227,7 +237,7 @@ async function processEmailWithRetry({
   maxRetries = 3,
   autoAppend,
   descriptionExtraction,
-  state
+  state,
 }) {
   let row;
   try {
@@ -253,12 +263,12 @@ async function processEmailWithRetry({
       processed = await processEmailRow({
         emailRow: row,
         sheetName,
-         sheetNameForPartnership,
+        sheetNameForPartnership,
         additionalContext: {
           ClientID: lead.id || "N/A",
           Category: lead.category || "Uncategorized",
           TimeStamp: email.timestamp_email || new Date().toISOString(),
-          Website: lead.website || lead.payload.website  || "none",
+          Website: lead.website || lead.payload.website || "none",
         },
         addToTotalEncoded: runContext.addToTotalEncoded,
         addTotalToBeApproved: runContext.addTotalToBeApproved,
@@ -266,7 +276,7 @@ async function processEmailWithRetry({
         setErrorContext: runContext.setErrorContext,
         autoAppend,
         descriptionExtraction,
-        state
+        state,
       });
 
       if (processed) break;

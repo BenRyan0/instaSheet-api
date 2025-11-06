@@ -571,47 +571,61 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
           body: JSON.stringify({
             model,
             messages: [
-              {
-                role: "system",
-                content: `
-    You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
+                     {
+                  role: "system",
+                  content: `
+                You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
 
-    ---
+                ---
 
-    ### OFFER CONTEXT
-    We help businesses access **working capital or merchant cash advances** based on their gross receipts — *not their credit score*. 
-    - Fast approval and same-day funding (often within 24 hours).  
-    - Designed for small and medium-sized businesses needing quick, flexible financing.  
-    - Simple qualification process with minimal documentation.
+                ### OFFER CONTEXT
+                We help businesses access **working capital or merchant cash advances (MCA)** based on their gross receipts — *not their credit score*.
+                - Fast approval and same-day funding (within 24 hours)
+                - Designed for small and medium-sized businesses needing quick, flexible financing
+                - Simple qualification process with minimal documentation
 
-    ---
+                ---
 
-    ### YOUR TASK
-    Read the email reply and identify what the sender is most likely interested in:
+                ### YOUR TASK
+                Read the email reply and decide what the sender is most likely interested in.  
+                Be flexible — many people express interest indirectly (for example, by asking questions, agreeing to talk, or showing curiosity).  
 
-    1. **"offer"** → The sender shows interest or curiosity about *our funding offer*.  
-       - They ask for terms, amounts, requirements, or next steps.  
-       - They request a call, meeting, or more information.  
-       - They forward or refer you to someone who handles financing.  
+                Choose **only one** of the following:
 
-    2. **"partnership"** → The sender is interested in *business collaboration* instead of funding.  
-       - They mention teaming up, cross-promotions, joint ventures, referrals, or lead-sharing.  
-       - They focus on cooperation or partnership opportunities rather than financing.  
+                1. **"offer"** → The sender shows *any level of interest, curiosity, or willingness to engage* about our funding offer.  
+                  - They request or agree to a chat, call, or more information.  
+                  - They reply positively, even with short or indirect responses such as:  
+                    - “Yes”, “Sure”, “Okay”, “Sounds good”, “Chat please”, “Let’s talk”, “Can you tell me more?”, “Who are you working with?”, “What companies have you talked to?”, “Interested”, “Send details”.  
+                  - They ask follow-up or contextual questions that suggest they’re open to learning more (e.g., “Where are you located?”, “Who handles your clients?”, “What’s the rate?”).  
+                  - They forward or refer you to someone who manages financing.  
+                  - *If the tone is open, curious, or conversational — treat it as “offer.”*
 
-    3. **"false"** → The sender is *not interested* in funding or partnership.  
-       - They reject, unsubscribe, or say they're not looking for funding.  
-       - They request unrelated help (grants, jobs, donations, etc.).  
-       - The message is automated, out-of-office, or irrelevant.  
+                2. **"sba"** → The sender specifically mentions or asks about *SBA loans* (Small Business Administration).  
+                  - Mentions “SBA”, “SBA loan”, “7(a)”, “504”, “government loan”, or “small business administration”.  
+                  - Asks if your company provides SBA loans or compares your offer to SBA funding.
 
-    ---
+                3. **"partnership"** → The sender is interested in *collaboration or referral opportunities*, not funding.  
+                  - Mentions teaming up, cross-promotions, joint ventures, or sharing leads.
 
-    ### RESPONSE FORMAT
-    Respond **only** with one lowercase word:
-    - "offer" → interested in funding  
-    - "partnership" → interested in collaboration  
-    - "false" → not interested or irrelevant
-  `,
-              },
+                4. **"false"** → The sender is *not interested* in funding, SBA loans, or partnership.  
+                  - They reject, unsubscribe, or say they’re not looking for funding.  
+                  - They request unrelated help (grants, jobs, donations, etc.).  
+                  - The message is automated, out-of-office, or irrelevant.
+
+                ---
+
+                ### TIE-BREAK RULE
+                If multiple intents appear, choose the one **most likely to lead to a continued conversation**:  
+                **offer > sba > partnership > false**
+
+                ---
+
+                ### RESPONSE FORMAT
+                Respond **only** with one of these exact lowercase words and nothing else:  
+                **offer**, **sba**, **partnership**, or **false**.
+                `
+                },
+
               { role: "user", content: text },
             ],
             temperature: 0,
@@ -643,6 +657,13 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
         console.warn(`Unexpected LLM output: "${modelOut}"`);
         attempt++;
         continue;
+      }
+
+      if (normalizedOut === "sba") {
+        console.log("Classified as: SBA (interested in funding offer)");
+        if (typeof addTotalInterestedLLM === "function")
+          addTotalInterestedLLM(1);
+        return { interested: true, type: "sba" };
       }
 
       if (normalizedOut === "offer") {

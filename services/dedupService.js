@@ -3,6 +3,156 @@
 const { colorize } = require("../utils/colorLogger");
 const { initGoogleClients } = require("../services/googleClient");
 
+
+
+function normalizeKey(email) {
+  if (!email || typeof email !== "string") return null;
+  return email.toLowerCase().trim();
+}
+async function isProcessed(emailKey, redisClient, redisKey) {
+  if (!emailKey) return false;
+  return await redisClient.sIsMember(redisKey, emailKey);
+}
+async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
+  console.log(`EMAIL KEY: ${emailKey}`);
+  if (!emailKey) return false;
+
+  try {
+    // Skip if already in memory
+    if (processedSet.has(emailKey)) {
+      console.log("02 - Already processed (local)");
+      return false;
+    }
+
+    // Always ensure Redis has it
+    const added = await redisClient.sAdd(redisKey, emailKey);
+
+    if (added === 0) {
+      console.log("03 - Already exists in Redis:", emailKey);
+      processedSet.add(emailKey);
+      return false;
+    }
+    console.log("Added new email to Redis:", emailKey);
+    processedSet.add(emailKey);
+
+   
+    return true;
+  } catch (err) {
+    console.error("Redis error:", err.message);
+    return false;
+  }
+}
+
+
+
+
+
+
+
+
+// Add this small helper delay function
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Small helper delay function
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = []) {
+  const newLeads = [];
+  const error = [];
+
+  // Ensure backward compatibility (add your old names if not already in array)
+  // You can initialize it like:
+  // const sheetNames = ["MainSheet", "PartnershipSheet"];
+  if (!Array.isArray(sheetNames) || sheetNames.length === 0) {
+    console.warn(
+      colorize("[warn]", "bgYellow"),
+      "No sheet names provided — please supply at least one."
+    );
+    return { newLeads: leads, error, errorOccurred: false };
+  }
+
+  for (const lead of leads) {
+    const key = lead.email?.toLowerCase().trim();
+    if (!key) {
+      newLeads.push(lead);
+      continue;
+    }
+
+    // Step 1: In-memory deduplication
+    if (processed.has(key)) {
+      console.log(
+        colorize("[dedup]", "lightBlue"),
+        `already processed email:`,
+        colorize(`${key}`, "lightBlue"),
+        colorize("𝓡𝓮𝓭𝓲𝓼", "red")
+      );
+      continue;
+    }
+
+    try {
+      let existsAnywhere = false;
+
+      // Step 2: Loop through all sheets in sheetNames[]
+      for (let i = 0; i < sheetNames.length; i++) {
+        const sheetToCheck = sheetNames[i];
+
+        const { exists } = await checkLeadEmailExists(key, sheetToCheck, spreadsheetId);
+
+        if (exists) {
+          console.log(
+            colorize("[sheet-dup]", "lightYellow"),
+            "email:",
+            colorize(`${key}`, "lightCyan"),
+            "already exists in sheet",
+            colorize(`${sheetToCheck}`, "green")
+          );
+          processed.add(key);
+          existsAnywhere = true;
+          break;
+        }
+
+        // Delay before checking next sheet (avoid rate-limit)
+        if (i < sheetNames.length - 1) {
+          await delay(500);
+        }
+      }
+
+      if (existsAnywhere) continue;
+
+      // Step 3: New lead — not found in any sheet
+      console.log(
+        colorize("[ LEAD OK ]", "green"),
+        "email=",
+        colorize(`${key}`, "lightCyan"),
+        "does NOT exist in any of these sheets:",
+        colorize(sheetNames.join(", "), "green")
+      );
+
+      newLeads.push(lead);
+      // processed.add(key);
+
+      // Optional delay before next lead
+      await delay(200);
+    } catch (err) {
+      console.error(
+        colorize("[error]", "bgRed"),
+        `Error checking email=${key}:`,
+        err.message
+      );
+      error.push({ email: key, message: err.message });
+      continue;
+    }
+  }
+
+  return { newLeads, error, errorOccurred: error.length > 0 };
+}
+
+
+
 async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
   if (!email || !sheetName || !spreadsheetId) {
     console.error(
@@ -77,223 +227,6 @@ async function checkLeadEmailExists(email, sheetName, spreadsheetId) {
     return { exists: false, error: err.message };
   }
 }
-
-function normalizeKey(email) {
-  if (!email || typeof email !== "string") return null;
-  return email.toLowerCase().trim();
-}
-async function isProcessed(emailKey, redisClient, redisKey) {
-  if (!emailKey) return false;
-  return await redisClient.sIsMember(redisKey, emailKey);
-}
-async function markProcessed(emailKey, redisClient, redisKey, processedSet) {
-  if (!emailKey) return false;
-
-  // Already in our local cache?
-  if (processedSet.has(emailKey)) {
-    return false;
-  }
-
-  // Add to Redis; sAdd returns 1 if added, 0 if it was already there
-  const added = await redisClient.sAdd(redisKey, emailKey);
-
-  if (added === 1) {
-    console.log(
-      colorize("[dedup]", "lightBlue"),
-      "newly added to Redis: ",
-      colorize(`${emailKey}`, "lightBlue"),
-      colorize("𝓡𝓮𝓭𝓲𝓼", "red")
-    );
-    processedSet.add(emailKey);
-    return true;
-  } else {
-    console.log(
-      colorize("[dedup]", "lightBlue"),
-      "already in Redis: ",
-      colorize(`${emailKey}`, "lightBlue"),
-      colorize("𝓡𝓮𝓭𝓲𝓼", "red")
-    );
-    // Keep in local set so subsequent checks skip it too
-    processedSet.add(emailKey);
-    return false;
-  }
-}
-
-
-// Add this small helper delay function
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function filterNewLeads(leads, processed, sheetNameForPartnership, sheetName, spreadsheetId) {
-  const newLeads = [];
-  const errors = [];
-
-  for (const lead of leads) {
-    const key = lead.email?.toLowerCase().trim();
-    if (!key) {
-      newLeads.push(lead);
-      continue;
-    }
-
-    // Step 1: Check in-memory deduplication
-    if (processed.has(key)) {
-      console.log(
-        colorize("[dedup]", "lightBlue"),
-        `already processed email:`,
-        colorize(`${key}`, "lightBlue"),
-        colorize("𝓡𝓮𝓭𝓲𝓼", "red")
-      );
-      continue;
-    }
-
-    try {
-      // Step 2: Check in the main sheet
-      const { exists: existsInMain } = await checkLeadEmailExists(key, sheetName, spreadsheetId);
-
-      if (existsInMain) {
-        console.log(
-          colorize("[sheet-dup]", "lightYellow"),
-          "email:",
-          colorize(`${key}`, "lightCyan"),
-          "already exists in sheet",
-          colorize(`${sheetName}`, "green")
-        );
-        continue;
-      }
-
-      // 🕐 Add delay before checking the partnership sheet
-      await delay(500); // 0.5 second delay (adjust to 1000ms if still hitting quota)
-
-      // Step 3: Check in the partnership sheet (if not found in main)
-      const { exists: existsInPartnership } = await checkLeadEmailExists(
-        key,
-        sheetNameForPartnership,
-        spreadsheetId
-      );
-
-      if (existsInPartnership) {
-        console.log(
-          colorize("[sheet-dup-2]", "lightYellow"),
-          "email:",
-          colorize(`${key}`, "lightCyan"),
-          "already exists in partnership sheet",
-          colorize(`${sheetNameForPartnership}`, "green")
-        );
-        continue;
-      }
-
-      // Step 4: If not found anywhere, it's a new lead
-      console.log(
-        colorize("[ LEAD OK ]", "green"),
-        "email=",
-        colorize(`${key}`, "lightCyan"),
-        "does NOT exist in either sheet",
-        colorize(`${sheetName} / ${sheetNameForPartnership}`, "green")
-      );
-
-      newLeads.push(lead);
-      processed.add(key); // add to dedup cache
-
-      // Optional: small delay before next iteration to slow down further
-      await delay(200);
-
-    } catch (err) {
-      console.error(
-        colorize("[error]", "bgRed"),
-        `Error checking email=${key}:`,
-        err.message
-      );
-      errors.push({ email: key, message: err.message });
-      continue; // skip lead but keep processing others
-    }
-  }
-
-  return { newLeads, errors, errorOccurred: errors.length > 0 };
-}
-
-
-// async function filterNewLeads(leads, processed, sheetNameForPartnership, sheetName, spreadsheetId) {
-//   const newLeads = [];
-//   const errors = [];
-
-//   for (const lead of leads) {
-//     const key = lead.email?.toLowerCase().trim();
-//     if (!key) {
-//       newLeads.push(lead);
-//       continue;
-//     }
-
-//     // Step 1: Check in-memory deduplication
-//     if (processed.has(key)) {
-//       console.log(
-//         colorize("[dedup]", "lightBlue"),
-//         `already processed email:`,
-//         colorize(`${key}`, "lightBlue"),
-//         colorize("𝓡𝓮𝓭𝓲𝓼", "red")
-//       );
-//       continue;
-//     }
-
-//     try {
-//       // Step 2: Check in the main sheet
-//       const { exists: existsInMain } = await checkLeadEmailExists(key, sheetName, spreadsheetId);
-
-//       if (existsInMain) {
-//         console.log(
-//           colorize("[sheet-dup]", "lightYellow"),
-//           "email:",
-//           colorize(`${key}`, "lightCyan"),
-//           "already exists in sheet",
-//           colorize(`${sheetName}`, "green")
-//         );
-//         continue;
-//       }
-
-//       // Step 3: Check in the partnership sheet (if not found in main)
-//       const { exists: existsInPartnership } = await checkLeadEmailExists(
-//         key,
-//         sheetNameForPartnership,
-//         spreadsheetId
-//       );
-
-//       if (existsInPartnership) {
-//         console.log(
-//           colorize("[sheet-dup-2]", "lightYellow"),
-//           "email:",
-//           colorize(`${key}`, "lightCyan"),
-//           "already exists in partnership sheet",
-//           colorize(`${sheetNameForPartnership}`, "green")
-//         );
-//         continue;
-//       }
-
-//       // Step 4: If not found anywhere, it's a new lead
-//       console.log(
-//         colorize("[ LEAD OK ]", "green"),
-//         "email=",
-//         colorize(`${key}`, "lightCyan"),
-//         "does NOT exist in either sheet",
-//         colorize(`${sheetName} / ${sheetNameForPartnership}`, "green")
-//       );
-
-//       newLeads.push(lead);
-//       processed.add(key); //add to dedup cache
-
-//     } catch (err) {
-//       console.error(
-//         colorize("[error]", "bgRed"),
-//         `Error checking email=${key}:`,
-//         err.message
-//       );
-//       errors.push({ email: key, message: err.message });
-//       continue; // skip lead but keep processing others
-//     }
-//   }
-
-//   return { newLeads, errors, errorOccurred: errors.length > 0 };
-// }
-
 
 module.exports = {
   normalizeKey,

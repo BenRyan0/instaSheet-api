@@ -30,6 +30,7 @@ const { colorize } = require("../../utils/colorLogger");
 const {
   incrementTotalFetchedLeads,
 } = require("../../services/instantly/lead/encodeService");
+const { default: flushToRedis, flushLocalCacheToRedis } = require("../../services/Redis/flushToRedis");
 
 class instantlyAiController {
   // main method for manual processing of the lead replies
@@ -53,13 +54,14 @@ class instantlyAiController {
         sheetNameForPartnership,
         autoAppend,
         descriptionExtraction,
+        sheetNameForSBA,
         clientId,
       } = req.body;
-      console.log(req.body);
-      if (!opts || !sheetName || !sheetNameForPartnership) {
+    
+      if (!opts || !sheetName || !sheetNameForPartnership || !sheetNameForSBA) {
         return responseReturn(res, 400, {
           error:
-            "SheetName or interested leads and for partnership and Options is required",
+            "SheetName for interested leads for offer, partnership, SBA and Options is required",
         });
       }
       if (!clientId) {
@@ -69,9 +71,10 @@ class instantlyAiController {
         });
       }
 
-      console.log(req.body);
-      console.log("req.body");
+      // await redisClient.sAdd("insta:processed_emails", "manual_test_email");
 
+      //Distination Sheet ID (not the sheet to append the replies)
+      const spreadsheetId = env.SPREADSHEET_ID; 
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
       let i = 0;
 
@@ -89,8 +92,7 @@ class instantlyAiController {
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
       });
-      console.log("runCtx_START");
-      console.log(runCtx);
+   
 
       // initialization of the container of the total processed and  fetched
       const state = initState({
@@ -125,19 +127,22 @@ class instantlyAiController {
         // cursor is based on the page limit to prevent fething the same page
         cursor = nextCursor;
 
-        //Distination Sheet ID (not the sheet to append the replies)
-        const spreadsheetId = env.SPREADSHEET_ID;
-
         // filtering the new and upprocessed leads
         // setting it to processed after gets done
         // returns an array of the unprocessed leads
+        const sheetNames = [
+          sheetName,
+          sheetNameForPartnership,
+          sheetNameForSBA,
+        ];
+
         const { newLeads, error } = await filterNewLeads(
           leads,
           seen,
-          sheetName,
-          sheetNameForPartnership,
-          spreadsheetId
+          spreadsheetId,
+          sheetNames
         );
+
         console.log(colorize(`[ lead count ${newLeads.length}]`, "lightCyan"));
         if (!newLeads.length) continue;
 
@@ -170,6 +175,7 @@ class instantlyAiController {
               email,
               sheetName,
               sheetNameForPartnership,
+              sheetNameForSBA,
               runContext: runCtx,
               autoAppend,
               descriptionExtraction,
@@ -183,28 +189,27 @@ class instantlyAiController {
             }
           }
 
-          //     console.log("state")
-          // console.log(state)
+
           emitProgress({ clientId, ctx: runCtx, show: false });
         }
       }
 
       emitProgress({ clientId, ctx: runCtx, show: false });
 
-      console.log("state");
-      console.log(state);
-
-      console.log("RUNCTX _END");
-      console.log(runCtx);
 
       const summary = summarizeState(runCtx);
       await loggerController.addNewLog(summary);
       await incrementTotalFetchedLeads(runCtx.totalEmailsCollected);
+      
+      await flushLocalCacheToRedis(redisClient, dedupKey, seen);
+
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);
     }
   };
+
+ 
 
   stopEncodingRun = async (req, res) => {
     try {

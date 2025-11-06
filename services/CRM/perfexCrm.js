@@ -3,12 +3,27 @@ const axios = require("axios");
 const con = require("../../db/db.js");
 const FormData = require("form-data");
 
-
 async function postAfterEncoding(args) {
   const { rowJson, sheetUrl, additionalContext } = args;
 
   console.log("postAfterEncoding - ARGS");
   console.log(args);
+
+  let phone =
+    rowJson["phone#from email"] ||
+    rowJson["phone 1"] ||
+    rowJson["company phone#"] ||
+    "";
+
+  if (
+    phone === null ||
+    phone === undefined ||
+    phone === "" ||
+    phone.toLowerCase() === "none"
+  ) {
+    // Skip assigning or processing the phone
+    phone = undefined; // or just don't include it in the final object
+  }
 
   // Build tags array dynamically
   const tags = [];
@@ -28,7 +43,7 @@ async function postAfterEncoding(args) {
     title: "",
     email: rowJson["lead email"] || "",
     website: additionalContext.Website || "",
-    phonenumber: rowJson["company phone#"] || "",
+    phonenumber: phone,
     company: rowJson.company || "",
     address: rowJson.address || "",
     city: rowJson.city || "",
@@ -77,7 +92,7 @@ async function postAfterEncoding(args) {
     console.log(response.data);
 
     await incrementAppendedToCRMLeads();
-    
+
     return response.status === 200;
   } catch (err) {
     console.error("CRM post error:", err.response?.data || err.message);
@@ -88,7 +103,13 @@ async function postAfterEncoding(args) {
 async function incrementAppendedToCRMLeads() {
   try {
     // Use the current date (YYYY-MM-DD)
-    const appended_date = ((d => `${d[2]}-${d[0].padStart(2,"0")}-${d[1].padStart(2,"0")}`)(new Date().toLocaleString("en-PH",{timeZone:"Asia/Manila"}).split(",")[0].split("/")));
+    const appended_date = ((d) =>
+      `${d[2]}-${d[0].padStart(2, "0")}-${d[1].padStart(2, "0")}`)(
+      new Date()
+        .toLocaleString("en-PH", { timeZone: "Asia/Manila" })
+        .split(",")[0]
+        .split("/")
+    );
 
     // Upsert logic: insert if not exists, else increment count
     await con.query(
@@ -107,8 +128,6 @@ async function incrementAppendedToCRMLeads() {
   }
 }
 
-
-
 module.exports = {
-  postAfterEncoding
+  postAfterEncoding,
 };

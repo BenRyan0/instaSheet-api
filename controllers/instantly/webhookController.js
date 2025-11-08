@@ -39,6 +39,10 @@ class webhookController {
     autoAppend,
     descriptionExtraction,
   }) {
+
+    console.log(`sheetNameForPartnership : ${sheetNameForPartnership}`)
+    console.log(`sheetNameForSBA : ${sheetNameForSBA}`)
+    console.log(`sheetName : ${sheetName}`)
     try {
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
       const spreadsheetId = env.SPREADSHEET_ID;
@@ -98,7 +102,8 @@ class webhookController {
           leads,
           seen,
           spreadsheetId,
-          sheetNames
+          sheetNames,
+          runCtx = state
         );
 
         if (Array.isArray(error) && error.length > 0) {
@@ -138,6 +143,7 @@ class webhookController {
               autoAppend,
               descriptionExtraction,
               state,
+              runCtx: state
             });
 
             if (processed) {

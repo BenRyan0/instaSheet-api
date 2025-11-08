@@ -16,6 +16,7 @@ const {
 } = require("../../services/instantly/lead/encodeService");
 const { extractBusinessDescription } = require("../emailParserService");
 const { mapToSheetRow } = require("../../mappers/sheetRow");
+const { emitProgress } = require("../../events/progressEmitter");
 
 async function processEmailRow({
   emailRow,
@@ -27,10 +28,12 @@ async function processEmailRow({
   setErrorContext,
   addToTotalEncoded,
   addTotalToBeApproved,
-  addTotalEnterestedLLM,
+  addTotalInterestedLLM,
   autoAppend,
   descriptionExtraction,
   state,
+  clientId,
+  runCtx,
 }) {
   console.log(colorize("Processing lead Email ...", "blue"));
   const spreadsheetId = env.SPREADSHEET_ID;
@@ -61,12 +64,12 @@ async function processEmailRow({
 
       const { interested, type } = await isActuallyInterested(
         rowJson["email reply"],
-        addTotalEnterestedLLM,
+        addTotalInterestedLLM,
         false
       );
 
       if (interested) {
-        state.addTotalEnterestedLLM(1);
+        emitProgress({ clientId, ctx: runCtx, show: false });
         const sheetNameForOffer = sheetName;
         await incrementFetchedInterestedLead();
 
@@ -155,22 +158,16 @@ async function processEmailRow({
 
       const { interested, type } = await isActuallyInterested(
         rowJson["email reply"],
-        addTotalEnterestedLLM,
+        addTotalInterestedLLM,
         false
       );
 
-      console.log("type");
-      console.log(type);
-
-      console.log("interested");
-      console.log(interested);
       if (interested) {
-        state.addTotalEnterestedLLM(1);
+        emitProgress({ clientId, ctx: runCtx, show: false });
         const sheetNameForOffer = sheetName;
         await incrementFetchedInterestedLead();
         // const sheetNameForPartnership = "Partner MCA";
 
-        
         const sheetNameMap = {
           partnership: sheetNameForPartnership,
           sba: sheetNameForSBA,
@@ -233,11 +230,14 @@ async function processEmailWithRetry({
   email,
   sheetName,
   sheetNameForPartnership,
+  sheetNameForSBA,
   runContext,
   maxRetries = 3,
   autoAppend,
   descriptionExtraction,
   state,
+  clientId,
+  runCtx,
 }) {
   let row;
   try {
@@ -264,19 +264,24 @@ async function processEmailWithRetry({
         emailRow: row,
         sheetName,
         sheetNameForPartnership,
+        sheetNameForSBA,
         additionalContext: {
           ClientID: lead.id || "N/A",
           Category: lead.category || "Uncategorized",
           TimeStamp: email.timestamp_email || new Date().toISOString(),
           Website: lead.website || lead.payload.website || "none",
         },
-        addToTotalEncoded: runContext.addToTotalEncoded,
-        addTotalToBeApproved: runContext.addTotalToBeApproved,
-        setErrorOccurred: runContext.setErrorOccurred,
-        setErrorContext: runContext.setErrorContext,
+        // bind runContext methods safely
+        addToTotalEncoded: (v) => runContext.addToTotalEncoded(v),
+        addTotalToBeApproved: (v) => runContext.addTotalToBeApproved(v),
+        setErrorOccurred: (v) => runContext.setErrorOccurred(v),
+        setErrorContext: (v) => runContext.setErrorContext(v),
+        addTotalInterestedLLM: (v) => runContext.addTotalInterestedLLM(v),
         autoAppend,
         descriptionExtraction,
         state,
+        clientId,
+        runCtx,
       });
 
       if (processed) break;

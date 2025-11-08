@@ -212,9 +212,10 @@ async function identifyBusinessCountry(url) {
 
 async function isUSByAI({
   addressText,
-  setErrorOccurred,
-  setErrorContext,
+  // setErrorOccurred,
+  // setErrorContext,
   keyIndex = 0,
+  runContext,
 }) {
   if (!addressText || addressText.trim() === "") return false;
 
@@ -245,8 +246,11 @@ async function isUSByAI({
 
     if (!apiKeys.length) {
       console.error("No OpenRouter API keys found.");
-      if (setErrorOccurred) setErrorOccurred(true);
-      if (setErrorContext) setErrorContext("No OpenRouter API keys found.");
+      if (runContext?.setErrorOccurred) {
+        runContext.setErrorOccurred(true);
+      }
+      if (runContext?.setErrorContext)
+        runContext.setErrorContext("No OpenRouter API keys found.");
       return false;
     }
 
@@ -313,8 +317,9 @@ async function isUSByAI({
         });
       }
 
-      if (setErrorOccurred) setErrorOccurred(true);
-      if (setErrorContext) setErrorContext(`HTTP ${resp.status}`);
+      if (runContext?.setErrorOccurred) runContext.setErrorOccurred(true);
+      if (runContext?.setErrorContext)
+        runContext.setErrorContext(`HTTP ${resp.status}`);
       return false;
     }
 
@@ -331,13 +336,15 @@ async function isUSByAI({
     if (reply === "false") return false;
 
     console.warn("Unexpected AI response, falling back:", reply);
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`Unexpected reply: ${reply}`);
+    if (runContext?.setErrorOccurred) runContext.setErrorOccurred(true);
+    if (runContext?.setErrorContext)
+      runContext.setErrorContext(`Unexpected reply: ${reply}`);
     return false;
   } catch (error) {
     console.error("Error calling OpenRouter:", error);
-    if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`isUSByAI: ${error.message}`);
+    if (runContext?.setErrorOccurred) runContext.setErrorOccurred(true);
+    if (runContext?.setErrorContext)
+      runContext.setErrorContext(`isUSByAI: ${error.message}`);
     return false;
   }
 }
@@ -349,8 +356,9 @@ async function isAddressUsBased({
   zip = "",
   country = "",
   phone = "",
-  setErrorOccurred,
-  setErrorContext,
+  runContext,
+  // setErrorOccurred,
+  // setErrorContext,
 } = {}) {
   try {
     const fields = { address, city, state, zip, country, phone };
@@ -435,8 +443,9 @@ async function isAddressUsBased({
     console.log(combinedText);
     const aiResult = await isUSByAI({
       addressText: combinedText,
-      setErrorOccurred,
-      setErrorContext,
+      runContext,
+      // setErrorOccurred,
+      // setErrorContext,
     });
 
     if (aiResult) {
@@ -571,9 +580,9 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
           body: JSON.stringify({
             model,
             messages: [
-                     {
-                  role: "system",
-                  content: `
+              {
+                role: "system",
+                content: `
                 You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
 
                 ---
@@ -595,7 +604,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
                 1. **"offer"** → The sender shows *any level of interest, curiosity, or willingness to engage* about our funding offer.  
                   - They request or agree to a chat, call, or more information.  
                   - They reply positively, even with short or indirect responses such as:  
-                    - “Yes”, “Sure”, “Okay”, “Sounds good”, “Chat please”, “Let’s talk”, “Can you tell me more?”, “Who are you working with?”, “What companies have you talked to?”, “Interested”, “Send details”.  
+                    - “Yes”, “Sure”, “Okay”, “Sounds good”, “Chat please”, “Let’s talk”, “Can you tell me more?”, “Who are you working with?”, “What companies have you talked to?”, “Interested”, “Send details”, “Please do”.  
                   - They ask follow-up or contextual questions that suggest they’re open to learning more (e.g., “Where are you located?”, “Who handles your clients?”, “What’s the rate?”).  
                   - They forward or refer you to someone who manages financing.  
                   - *If the tone is open, curious, or conversational — treat it as “offer.”*
@@ -623,8 +632,8 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
                 ### RESPONSE FORMAT
                 Respond **only** with one of these exact lowercase words and nothing else:  
                 **offer**, **sba**, **partnership**, or **false**.
-                `
-                },
+                `,
+              },
 
               { role: "user", content: text },
             ],
@@ -650,7 +659,7 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
         "";
 
       const normalizedOut =
-        (modelOut.match(/\b(offer|partnership|false)\b/i) ||
+        (modelOut.match(/\b(offer|partnership|sba|false)\b/i) ||
           [])[1]?.toLowerCase() || "";
 
       if (!normalizedOut) {
@@ -675,6 +684,8 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
       if (normalizedOut === "partnership") {
         console.log("Classified as: PARTNERSHIP (interested in collaboration)");
+        if (typeof addTotalInterestedLLM === "function")
+          addTotalInterestedLLM(1);
         return { interested: true, type: "partnership" };
       }
 
@@ -699,153 +710,6 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
   return ruleResult;
 }
-
-// async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
-//   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
-//     console.warn("Skipping empty or invalid email reply");
-//     return false;
-//   }
-
-//   const text = normalize(emailReply);
-//   const url = "https://openrouter.ai/api/v1/chat/completions";
-//   const apiKeys = [
-//     env.OPENROUTER_API_KEY,
-//     env.OPENROUTER_API_KEY2,
-//     env.OPENROUTER_API_KEY3,
-//   ].filter(Boolean);
-
-//   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
-
-//   if (!apiKeys.length) {
-//     console.error(
-//       "No OpenRouter API keys available → using rule-based fallback."
-//     );
-//     return ruleBasedCheck(text);
-//   }
-
-//   let attempt = 0;
-//   const maxAttempts = 3;
-
-//   while (attempt < maxAttempts) {
-//     const keyIndex = attempt % apiKeys.length;
-//     const currentKey = apiKeys[keyIndex];
-
-//     console.log(
-//       `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
-//         keyIndex + 1
-//       })`
-//     );
-
-//     try {
-//       const headers = {
-//         Authorization: `Bearer ${currentKey}`,
-//         "Content-Type": "application/json",
-//       };
-
-//       const resp = await fetchWithTimeout(
-//         url,
-//         {
-//           method: "POST",
-//           headers,
-//           body: JSON.stringify({
-//             model,
-//             messages: [
-//               {
-//                 role: "system",
-//                 content: `
-//                 You are an assistant that determines if an email reply shows genuine *interest* in the funding offer described below.
-
-//                 ### OFFER CONTEXT
-//                 We provide working capital or cash advances to businesses based on their gross receipts.
-//                 - Credit score does not affect eligibility.
-//                 - Funding can be released within 24 hours.
-
-//                 ### YOUR TASK
-//                 Analyze the email reply and classify it as **true** (interested) or **false** (not interested).
-
-//                 ### CLASSIFY AS TRUE IF:
-//                 - The reply shows curiosity, openness, or willingness to continue the conversation.
-//                 - The sender asks for a summary, information, or clarification — even briefly.
-//                 - The reply includes positive or permissive phrases such as:
-//                   "Yes", "Sure", "Okay", "Fine", "Go ahead", "Send it", "Please send info",
-//                   "A brief summary is fine", "Tell me more", "Interested", "Let's talk",
-//                   "Give me a call", "We need funding", "What are the terms?"
-//                 - The tone is polite and allows engagement.
-//                 - The sender refers you to another person handling funding or finance decisions.
-
-//                 ### CLASSIFY AS FALSE IF:
-//                 - The reply rejects the offer: "Not interested", "No thanks", "We already got funding", "Stop emailing me".
-//                 - The reply requests something unrelated (grants, jobs, donations, etc.).
-//                 - The reply is automated or non-human ("Received", "Out of office", "Unsubscribe").
-//                 - The reply expresses negative sentiment toward the offer.
-
-//                 Respond strictly with one lowercase word: **true** or **false**.
-//               `,
-//               },
-//               { role: "user", content: text },
-//             ],
-//             temperature: 0,
-//           }),
-//         },
-//         60000 // 60s timeout
-//       );
-
-//       console.log("Response status:", resp.status);
-
-//       // HTTP error handling
-//       if (!resp.ok) {
-//         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
-//         attempt++;
-//         await new Promise((r) => setTimeout(r, 2000 * attempt)); // linear backoff
-//         continue;
-//       }
-
-//       const json = await resp.json();
-//       const modelOut =
-//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
-//         "";
-
-//       const normalizedOut =
-//         (modelOut.match(/\b(true|false|yes|no|interested|not interested)\b/i) ||
-//           [])[1]?.toLowerCase() || "";
-
-//       if (!normalizedOut) {
-//         console.warn(`Unexpected LLM output: "${modelOut}"`);
-//         attempt++;
-//         continue; // retry again
-//       }
-
-//       if (["true", "yes", "interested"].includes(normalizedOut)) {
-//         console.log("Classified as: TRUE (interested)");
-//         if (typeof addTotalInterestedLLM === "function")
-//           addTotalInterestedLLM(1);
-//         return true;
-//       }
-
-//       if (["false", "no", "not interested"].includes(normalizedOut)) {
-//         console.log("Classified as: FALSE (not interested)");
-//         return false;
-//       }
-
-//       // Unrecognized → treat as false
-//       console.warn(`Unrecognized classification output: "${modelOut}"`);
-//       return false;
-//     } catch (err) {
-//       console.error(
-//         `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
-//       );
-//       attempt++;
-//       await new Promise((r) => setTimeout(r, 2000 * attempt));
-//     }
-//   }
-
-//   // --- Final fallback after all attempts ---
-//   console.warn("All retries failed → using rule-based fallback check...");
-//   const ruleResult = ruleBasedCheck(text);
-//   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
-//   return ruleResult;
-// }
 
 // --- n8n Fallback Helper ---
 async function sendToN8nWebhook(emailReply) {

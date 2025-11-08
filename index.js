@@ -48,6 +48,10 @@ app.get("/", (req, res) => {
   res.send("You Have Reached the endpoint of instaSheet");
 });
 
+app.get("/api/wakey-wakey", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Backend is awake!" });
+});
+
 
 
 server.listen(port, () => {

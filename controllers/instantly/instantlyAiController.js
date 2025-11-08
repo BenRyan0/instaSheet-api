@@ -17,6 +17,7 @@ const {
   summarizeState,
   createRunContext,
   activeRunContexts,
+  clearRunContext,
 } = require("../../services/stateService");
 const { handleError } = require("../../services/errorService");
 const loggerController = require(".././loggerController");
@@ -30,12 +31,16 @@ const { colorize } = require("../../utils/colorLogger");
 const {
   incrementTotalFetchedLeads,
 } = require("../../services/instantly/lead/encodeService");
-const { default: flushToRedis, flushLocalCacheToRedis } = require("../../services/Redis/flushToRedis");
+const {
+  default: flushToRedis,
+  flushLocalCacheToRedis,
+} = require("../../services/Redis/flushToRedis");
 
 class instantlyAiController {
   // main method for manual processing of the lead replies
   // those email replies that were not encoded the day it was set as interested
   getInterestedRepliesOnly_ = async (req, res) => {
+    let runCtx;
     try {
       // req paramaters
       // sheetName is the name of the sheet that the interested leads will be appended on
@@ -57,7 +62,8 @@ class instantlyAiController {
         sheetNameForSBA,
         clientId,
       } = req.body;
-    
+      console.log(req.body);
+
       if (!opts || !sheetName || !sheetNameForPartnership || !sheetNameForSBA) {
         return responseReturn(res, 400, {
           error:
@@ -74,7 +80,7 @@ class instantlyAiController {
       // await redisClient.sAdd("insta:processed_emails", "manual_test_email");
 
       //Distination Sheet ID (not the sheet to append the replies)
-      const spreadsheetId = env.SPREADSHEET_ID; 
+      const spreadsheetId = env.SPREADSHEET_ID;
       const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
       let i = 0;
 
@@ -87,12 +93,11 @@ class instantlyAiController {
 
       // context container
       // contains how much is processed and  fetched
-      const runCtx = createRunContext({
+      runCtx = createRunContext({
         maxEmails: opts.maxEmails,
         maxPages: opts.maxPages,
         aiInterestThreshold: opts.aiInterestThreshold,
       });
-   
 
       // initialization of the container of the total processed and  fetched
       const state = initState({
@@ -111,7 +116,7 @@ class instantlyAiController {
       while (shouldContinue(runCtx) && !runCtx.errorOccurred) {
         // appending +1 of the pages that is fetched
         runCtx.nextPage();
-        emitProgress({ clientId, ctx: runCtx, show: false });
+        emitProgress({ clientId, ctx: runCtx, show: true });
 
         // fetching the lead's details
         const { leads, nextCursor } = await fetchAndNormalizeLeads({
@@ -140,7 +145,8 @@ class instantlyAiController {
           leads,
           seen,
           spreadsheetId,
-          sheetNames
+          sheetNames,
+          runCtx
         );
 
         console.log(colorize(`[ lead count ${newLeads.length}]`, "lightCyan"));
@@ -151,7 +157,7 @@ class instantlyAiController {
           // appending +1 to the total of leads processed
 
           runCtx.nextLead();
-          emitProgress({ clientId, ctx: runCtx, show: false });
+          emitProgress({ clientId, ctx: runCtx, show: true });
 
           // fetching the email replies of the leads
           const interestedEmails = await getInterestedReplies({
@@ -180,6 +186,8 @@ class instantlyAiController {
               autoAppend,
               descriptionExtraction,
               state,
+              clientId,
+              runCtx,
             });
 
             // if the process was done and no errors has occured set the lead email as processed
@@ -189,53 +197,75 @@ class instantlyAiController {
             }
           }
 
-
-          emitProgress({ clientId, ctx: runCtx, show: false });
+          emitProgress({ clientId, ctx: runCtx, show: true });
         }
       }
 
-      emitProgress({ clientId, ctx: runCtx, show: false });
-
+      emitProgress({ clientId, ctx: runCtx, show: true });
 
       const summary = summarizeState(runCtx);
       await loggerController.addNewLog(summary);
       await incrementTotalFetchedLeads(runCtx.totalEmailsCollected);
-      
+
       await flushLocalCacheToRedis(redisClient, dedupKey, seen);
 
       return responseReturn(res, 200, summary);
     } catch (err) {
       return handleError(err, res);
+    } finally {
+      if (runCtx) {
+        console.log(`Clearing run context for ${runCtx.runId}`);
+        clearRunContext(runCtx.runId);
+      }
     }
   };
 
- 
-
+  // controllers/encodingController.js
   stopEncodingRun = async (req, res) => {
     try {
       console.log("STOP ENCODING RUN INITIATED");
 
-      const { runId } = req.body; // optional: identify which run to stop
-      const targetRunCtx = runId
-        ? activeRunContexts.get(runId)
-        : activeRunContexts.get("default");
+      const { runId } = req.body; // Explicitly provided run ID
+      console.log(`runId ${runId}`);
 
-      if (!targetRunCtx) {
-        return responseReturn(res, 404, {
-          message: "No active encoding run found.",
+      if (!runId) {
+        return responseReturn(res, 400, {
+          message: "Missing runId in request body.",
         });
       }
 
+      // Look up the target run context using the provided runId
+      const targetRunCtx = activeRunContexts.get(runId);
+
+      if (!targetRunCtx) {
+        return responseReturn(res, 404, {
+          message: `No active run context found for runId: ${runId}`,
+        });
+      }
+
+      // Gracefully stop this run
       targetRunCtx.errorOccurred = true;
       targetRunCtx.errorContext = "Manually stopped by user";
 
-      responseReturn(res, 200, {
-        message: "Encoding run successfully stopped.",
-        runId: runId || "default",
+      console.log(`Run ${runId} has been manually stopped.`);
+
+      // Optional: emit a progress update to notify frontend immediately
+      emitProgress({
+        clientId: targetRunCtx.clientId || "unknown",
+        ctx: targetRunCtx,
+        show: true,
+        message: "Run manually stopped by user",
+      });
+      // Optional cleanup: remove from active contexts after stopping
+      clearRunContext(runId);
+
+      return responseReturn(res, 200, {
+        message: `Encoding run successfully stopped.`,
+        runId,
       });
     } catch (error) {
       console.error("Error stopping encoding run:", error);
-      responseReturn(res, 500, {
+      return responseReturn(res, 500, {
         message: "Error stopping the encoding run.",
         error: error.message,
       });

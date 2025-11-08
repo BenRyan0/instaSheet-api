@@ -60,7 +60,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = []) {
+async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = [],runCtx) {
   const newLeads = [];
   const error = [];
 
@@ -131,7 +131,7 @@ async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = []) 
         "does NOT exist in any of these sheets:",
         colorize(sheetNames.join(", "), "green")
       );
-
+      runCtx.addTotalUnProcessedLeads(1)
       newLeads.push(lead);
       // processed.add(key);
 

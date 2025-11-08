@@ -4,7 +4,7 @@ const { colorize } = require("../../../utils/colorLogger");
 const con = require("../../../db/db.js");
 
 async function fetchLeadsPageWebhook({
-  pageLimit = 3,
+  pageLimit = 5,
   authHeaders,
   setErrorOccurred,
   setErrorContext,

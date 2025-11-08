@@ -12,9 +12,9 @@ function buildProgressState({
   maxEmailsCap,
   maxPagesCap,
   aiInterestThreshold,
-  totalEncoded = 0,
-  totalToBeApproved = 0,
-  totalInterestedLLM = 0,
+  totalEncoded,
+  totalToBeApproved,
+  totalInterestedLLM,
    runId,
    unProcessedLeads
 }) {

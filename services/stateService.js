@@ -14,15 +14,11 @@ function initState({
     processedLeads: 0,
     totalEmailsCollected: 0,
     unProcessedLeads: 0,
-    // Collections to report
     rows: [],
-    // Mirrors Redis set size; distinct leads we’ve checked
     distinctLeadsChecked: 0,
-    // How many leads yielded ≥1 interested reply
     interestedLeadCount: 0,
-    // Did we bail early (hit maxEmails or maxPages)?
     stoppedEarly: false,
-    // Caps & thresholds
+    errorOccurred: false,
     maxEmails,
     maxEmailsCap: maxEmails,
     maxPages,
@@ -33,11 +29,25 @@ function initState({
     totalToBeApproved: 0,
     runId: runId,
 
+    setErrorContext(val) {
+      this.errorContext = val;
+    },
+    setErrorOccurred(val) {
+      this.errorOccurred = val;
+    },
+
+    addToTotalEncoded(val) {
+      this.totalEncoded += val;
+    },
+    addTotalToBeApproved(val) {
+      this.totalToBeApproved += val;
+    },
+
     setRunId(val) {
       this.runId = val;
     },
 
-    addTotalEnterestedLLM(val) {
+    addTotalInterestedLLM(val) {
       this.totalInterestedLLM += val;
     },
     addTotalUnProcessedLeads(val) {
@@ -48,7 +58,7 @@ function initState({
       // simpler: increment directly
       this.totalEmailsCollected += count;
 
-      console.log(`Total Emails Collected: ${this.totalEmailsCollected}`);
+      // console.log(`Total Emails Collected: ${this.totalEmailsCollected}`);
     },
 
     // Call this once per page fetched.
@@ -118,15 +128,21 @@ function createRunContext({
 
   const ctx = {
     runId: finalRunId,
+    pagesFetched: 0,
+    processedLeads: 0,
     unProcessedLeads: 0,
+    rows: [],
+    distinctLeadsChecked: 0,
+    interestedLeadCount: 0,
+    stoppedEarly: false,
     totalEncoded: 0,
     totalToBeApproved: 0,
-    ctxTotalInterestedLLM: 0,
+    totalInterestedLLM: 0,
     errorOccurred: false,
     errorContext: "",
-    pagesFetched: 0,
+
     totalEmailsCollected: 0,
-    processedLeads: 0,
+
     distinctLeadsChecked: 0,
     stoppedEarly: false,
     maxEmails,
@@ -163,8 +179,8 @@ function createRunContext({
       this.totalToBeApproved += val;
     },
 
-    addTotalEnterestedLLM(val) {
-      this.ctxTotalInterestedLLM += val;
+    addTotalInterestedLLM(val) {
+      this.totalInterestedLLM += val;
     },
 
     setErrorOccurred(val) {
@@ -176,21 +192,22 @@ function createRunContext({
     },
   };
 
-  activeRunContexts.set(runId, ctx);
+  activeRunContexts.set(finalRunId, ctx);
   return ctx;
 }
 
 /**
  * Retrieve an existing run context by ID
  */
-function getRunContext(runId = "default") {
+function getRunContext(runId) {
   return activeRunContexts.get(runId);
 }
 
 /**
  * Clear a run context when finished
  */
-function clearRunContext(runId = "default") {
+function clearRunContext(runId) {
+  console.log(runId);
   activeRunContexts.delete(runId);
 }
 

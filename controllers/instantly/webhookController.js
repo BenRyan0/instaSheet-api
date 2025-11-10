@@ -38,6 +38,7 @@ class webhookController {
     sheetNameForSBA,
     autoAppend,
     descriptionExtraction,
+    clientId
   }) {
 
     console.log(`sheetNameForPartnership : ${sheetNameForPartnership}`)
@@ -103,7 +104,8 @@ class webhookController {
           seen,
           spreadsheetId,
           sheetNames,
-          runCtx = state
+          {runCtx: state}
+          
         );
 
         if (Array.isArray(error) && error.length > 0) {
@@ -143,6 +145,7 @@ class webhookController {
               autoAppend,
               descriptionExtraction,
               state,
+              clientId,
               runCtx: state
             });
 
@@ -159,6 +162,8 @@ class webhookController {
       await incrementTotalFetchedLeads(state.totalEmailsCollected);
 
       await flushLocalCacheToRedis(redisClient, dedupKey, seen);
+      console.log("SUMMARY")
+      console.log(summary)
       return summary;
     } catch (err) {
       console.error("Fatal error in encodeInterestedRepliesByWebhook:", err);

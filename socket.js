@@ -9,7 +9,7 @@ let io;
 
 // Efficient Maps for O(1) lookups and cleanup
 const activeSockets = new Map(); // socket.id -> metadata
-const userSockets = new Map();   // userId -> socketId
+const userSockets = new Map(); // userId -> socketId
 const activeClients = new Map(); // clientId -> socket
 
 // ---------------------------------------------
@@ -29,21 +29,25 @@ const init = (server, options = {}) => {
 
     // Reject invalid client
     if (!clientId) {
-      console.warn("❌ Missing clientId — disconnecting");
+      console.warn("Missing clientId — disconnecting");
       socket.disconnect(true);
       return;
     }
 
-    console.log(`🔌 Connected: user=${userId}, client=${clientId}, socket=${socket.id}`);
+    console.log(
+      `Connected: user=${userId}, client=${clientId}, socket=${socket.id}`
+    );
 
     // ---------------------------------------------
     // Handle Reconnection / Duplicate Clients
     // ---------------------------------------------
     const oldSocket = activeClients.get(clientId);
     if (oldSocket && oldSocket.id !== socket.id && oldSocket.connected) {
-      console.log(`♻️ Replacing old connection for clientId=${clientId}`);
+      console.log(`Replacing old connection for clientId=${clientId}`);
       // Gracefully tell old socket to disconnect
-      oldSocket.emit("force_disconnect", { reason: "Replaced by new connection" });
+      oldSocket.emit("force_disconnect", {
+        reason: "Replaced by new connection",
+      });
       oldSocket.disconnect(true);
     }
 
@@ -65,7 +69,7 @@ const init = (server, options = {}) => {
     // Cleanup logic on disconnect
     // ---------------------------------------------
     socket.on("disconnect", (reason) => {
-      console.warn(`⚠️ Disconnected socket=${socket.id} → ${reason}`);
+      console.warn(`Disconnected socket=${socket.id} → ${reason}`);
 
       const data = activeSockets.get(socket.id);
       if (data) {
@@ -78,7 +82,7 @@ const init = (server, options = {}) => {
         if (data.clientId) activeClients.delete(data.clientId);
       }
 
-      console.log(`🧹 Cleaned up socket=${socket.id}`);
+      console.log(`Cleaned up socket=${socket.id}`);
     });
 
     // ---------------------------------------------
@@ -87,23 +91,28 @@ const init = (server, options = {}) => {
     const webhookController = require("./controllers/instantly/webhookController");
 
     socket.on("new_email_added", async (payload) => {
+      io.emit("encoding_progress", { message: `Websocket Triggerd` });
       const socketData = activeSockets.get(socket.id);
       if (!socketData) return;
 
       if (socketData.isProcessing) {
-        console.log(`⚠️ Ignored trigger for ${socket.id} — still processing.`);
-        socket.emit("processing_busy", { message: "Still processing previous request" });
+        console.log(`Ignored trigger for ${socket.id} — still processing.`);
+        socket.emit("processing_busy", {
+          message: "Still processing previous request",
+        });
         return;
       }
 
       socketData.isProcessing = true;
-      console.log(`🚀 Processing new_email_added for ${socket.id}`);
+      console.log(`Processing new_email_added for ${socket.id}`);
 
       // Set processing timeout
       const processingTimeout = setTimeout(() => {
         if (socketData.isProcessing) {
           socketData.isProcessing = false;
-          socket.emit("processing_error", { message: "Processing timeout exceeded" });
+          socket.emit("processing_error", {
+            message: "Processing timeout exceeded",
+          });
         }
       }, SOCKET_LIMITS.processingTimeout);
       socketData.timeouts.add(processingTimeout);
@@ -120,21 +129,29 @@ const init = (server, options = {}) => {
           aiInterestThreshold: 1,
         };
 
-        console.log("📨 Payload received:", payload);
+        console.log("Payload received:", payload);
+        const clientId = "webhook-cID-x1";
 
-        await webhookController.encodeInterestedRepliesByWebhook({
-          opts,
-          sheetName: payload.sheetName || "MCA Loan",
-          sheetNameForPartnership: payload.sheetNameForPartnership || "Partner MCA",
-          sheetNameForSBA: payload.sheetNameForSBA || "SBA-MCA",
-          autoAppend: true,
-          descriptionExtraction: true,
+        const summary =
+          await webhookController.encodeInterestedRepliesByWebhook({
+            opts,
+            sheetName: payload.sheetName || "MCA Loan",
+            sheetNameForPartnership:
+              payload.sheetNameForPartnership || "Partner MCA",
+            sheetNameForSBA: payload.sheetNameForSBA || "SBA-MCA",
+            autoAppend: true,
+            descriptionExtraction: true,
+            clientId,
+          });
+
+        console.log("summary in socket");
+        console.log(summary);
+        console.log(`Completed encode for ${socket.id}`);
+        io.emit("encoding_progress", {
+          message: `${summary.totalEncoded} leads Encoded`,
         });
-
-        console.log(`✅ Completed encode for ${socket.id}`);
-        socket.emit("processing_done", { message: "Completed successfully" });
       } catch (err) {
-        console.error(`❌ Error during processing for ${socket.id}:`, err);
+        console.error(`Error during processing for ${socket.id}:`, err);
         socket.emit("processing_error", { message: err.message });
       } finally {
         socketData.isProcessing = false;
@@ -144,7 +161,7 @@ const init = (server, options = {}) => {
     });
   });
 
-  console.log("✅ Socket.IO initialized");
+  console.log("Socket.IO initialized");
   return io;
 };
 

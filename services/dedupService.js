@@ -60,7 +60,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = [],runCtx) {
+async function filterNewLeads(leads, processed, spreadsheetId, sheetNames = [],{ runCtx }) {
   const newLeads = [];
   const error = [];
 

@@ -146,7 +146,7 @@ class instantlyAiController {
           seen,
           spreadsheetId,
           sheetNames,
-          runCtx
+          {runCtx}
         );
 
         console.log(colorize(`[ lead count ${newLeads.length}]`, "lightCyan"));

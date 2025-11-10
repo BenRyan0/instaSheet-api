@@ -31,7 +31,6 @@ async function processEmailRow({
   addTotalInterestedLLM,
   autoAppend,
   descriptionExtraction,
-  state,
   clientId,
   runCtx,
 }) {

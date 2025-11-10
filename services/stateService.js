@@ -226,7 +226,7 @@ function summarizeState(state, runCtx = {}) {
     maxEmailsCap: state?.maxEmails || 0,
     maxPagesCap: state?.maxPages || 0,
     aiInterestThreshold: state?.aiInterestThreshold || 0,
-    totalEncoded: runCtx.totalEncoded || 0,
+    totalEncoded: runCtx.totalEncoded || state.totalEncoded || 0,
     totalToBeApproved: runCtx.totalToBeApproved || 0,
     totalEnterestedLLM: runCtx.totalEnterestedLLM || 0,
     errorContext: runCtx.errorContext || "",

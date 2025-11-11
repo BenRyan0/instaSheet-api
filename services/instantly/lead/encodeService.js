@@ -724,6 +724,39 @@ async function incrementTotalFetchedLeads(count) {
   }
 }
 
+async function incrementClassifiedInterestReplies(type) {
+  try {
+    if (!["offers", "sba", "partnership"].includes(type)) {
+      throw new Error(`Invalid type: ${type}`);
+    }
+
+    // Get current date in YYYY-MM-DD (Asia/Manila)
+    const date_fetched = ((d =>
+      `${d[2]}-${d[0].padStart(2, "0")}-${d[1].padStart(2, "0")}`)(
+      new Date()
+        .toLocaleString("en-PH", { timeZone: "Asia/Manila" })
+        .split(",")[0]
+        .split("/")
+    ));
+
+    // UPSERT logic — insert new or increment existing
+    await con.query(
+      `
+      INSERT INTO classified_interest_replies (type, date_fetched, fetched_count)
+      VALUES ($1, $2, 1)
+      ON CONFLICT (type, date_fetched)
+      DO UPDATE SET fetched_count = classified_interest_replies.fetched_count + 1
+      `,
+      [type, date_fetched]
+    );
+
+    console.log(`✅ Updated count for '${type}' on ${date_fetched}`);
+  } catch (err) {
+    console.error("❌ Error updating classified_interest_replies:", err.message);
+  }
+}
+
+
 markToBeApprovedLead = async (req, res) => {
   const { id } = req.body;
   try {
@@ -761,4 +794,5 @@ module.exports = {
   diagnoseGoogleSheetAccess,
   incrementFetchedInterestedLead,
   incrementTotalFetchedLeads,
+  incrementClassifiedInterestReplies
 };

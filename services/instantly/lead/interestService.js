@@ -2,6 +2,7 @@ const env = require("../../../env");
 const { colorize } = require("../../../utils/colorLogger");
 const { patterns } = require("../../../Filters/addressRegexConfig.json");
 const { Firecrawl } = require("firecrawl");
+const { incrementClassifiedInterestReplies } = require("./encodeService");
 
 // Compile regexes once
 const regexes = Object.fromEntries(
@@ -671,21 +672,24 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
       if (normalizedOut === "sba") {
         console.log("Classified as: SBA (interested in funding offer)");
         if (typeof addTotalInterestedLLM === "function")
-          addTotalInterestedLLM(1);
+          await addTotalInterestedLLM(1);
+        await incrementClassifiedInterestReplies("sba")
         return { interested: true, type: "sba" };
       }
 
       if (normalizedOut === "offer") {
         console.log("Classified as: OFFER (interested in funding offer)");
         if (typeof addTotalInterestedLLM === "function")
-          addTotalInterestedLLM(1);
+         await addTotalInterestedLLM(1);
+        await incrementClassifiedInterestReplies("offers")
         return { interested: true, type: "offer" };
       }
 
       if (normalizedOut === "partnership") {
         console.log("Classified as: PARTNERSHIP (interested in collaboration)");
         if (typeof addTotalInterestedLLM === "function")
-          addTotalInterestedLLM(1);
+         await addTotalInterestedLLM(1);
+        await incrementClassifiedInterestReplies("partnership")
         return { interested: true, type: "partnership" };
       }
 

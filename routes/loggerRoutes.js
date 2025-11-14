@@ -4,6 +4,7 @@ const { encodeLeadFromRequest,markToBeApprovedLead } = require("../services/inst
 
 router.post("/log/add-new-log", loggerController.addNewLog);
 router.get("/log/get-all-logs", loggerController.getAllLogs);
+router.get("/log/get-all-logs-table", loggerController.getAllLogsTable);
 router.get("/tobeencoded-leads", loggerController.getAllTobeEncodedLeads);
 
 

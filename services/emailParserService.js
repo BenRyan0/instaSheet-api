@@ -421,6 +421,196 @@ async function extractReply({
     return normalizeSchema({});
   }
 }
+async function extractReplyEmail({
+  emailContent,
+  content_preview,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  const MAX_RETRIES = 2;
+  const RETRY_DELAY_BASE = 2000;
+
+  const apiKeys = [
+    env.OPENROUTER_API_KEY,
+    env.OPENROUTER_API_KEY2,
+    env.OPENROUTER_API_KEY3,
+  ].filter(Boolean);
+
+  if (!apiKeys.length) {
+    console.error("No OpenRouter API keys found.");
+    setErrorOccurred?.(true);
+    return normalizeSchema({});
+  }
+
+  const model = env.OPEN_ROUTER_MODEL || "openai/gpt-5-chat";
+  let cleanedContent = emailContent?.trim() || "";
+
+  try {
+    const wordCount = cleanedContent.split(/\s+/).length;
+    if (wordCount >= 20) {
+      cleanedContent = cleanEmailContent(cleanedContent, 100);
+      console.log(colorize("CleanedContent", "cyan"), cleanedContent);
+    } else {
+      console.log(`Skipping cleanEmailContent — only ${wordCount} words detected.`);
+    }
+
+    if (!cleanedContent) {
+      setErrorOccurred?.(false);
+      return normalizeSchema({});
+    }
+
+    // --- UPDATED PROMPT ---
+    const prompt = `
+      You are an email parsing assistant.
+
+      Task: Extract the **latest human reply** from an email thread, and also extract:
+      - Any phone numbers mentioned (return as a single text string).
+      - The email signature block (if present).
+      - The mailing address (if found in the signature).
+
+      Rules:
+      1. Find where this content preview first appears: "${content_preview}" (case-insensitive).
+      2. Collect all text until a line that matches patterns like:
+         ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
+         Begin forwarded message, -----Original Message-----
+      3. Split into:
+         a) Main reply content
+         b) Signature (if detected)
+      4. Signature typically begins with:
+         --, –, —, Thanks,, Thank you,, Best,, Regards,, Sincerely,
+         or contains job title, phone, email, company, website, or address.
+      5. Remove quoted lines (starting with ">") and collapse blank lines.
+      6. Detect all phone numbers ((xxx) xxx-xxxx, +1 xxx xxx xxxx, etc.).
+         Combine multiple numbers into a comma-separated string.
+      7. Detect physical addresses (look for street numbers, city/state names, ZIP/postal codes, etc.)
+         and output as a single cleaned text string.
+      8. Output only JSON, like:
+      {
+        "reply": "cleaned_reply_text_without_signature",
+        "phone_number": "comma-separated phone numbers or empty string",
+        "signature": "signature_text_or_empty_string",
+        "address": "address_text_or_empty_string"
+      }
+    `;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const keyIndex = attempt % apiKeys.length;
+      const headers = {
+        Authorization: `Bearer ${apiKeys[keyIndex]}`,
+        "Content-Type": "application/json",
+      };
+
+      console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${attempt + 1}`);
+
+      const body = JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: cleanedContent },
+        ],
+        temperature: 0,
+      });
+
+      let resp;
+      try {
+        resp = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers,
+          body,
+        }, 60000);
+      } catch (err) {
+        console.error("Network or timeout error:", err.message);
+        setErrorOccurred?.(true);
+        setErrorContext?.(err.message);
+        continue;
+      }
+
+      if (resp.status === 429 && attempt < apiKeys.length - 1) {
+        const delay = RETRY_DELAY_BASE * (attempt + 1);
+        console.warn(`Rate limited. Retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      if (!resp.ok) {
+        console.error("OpenRouter Error:", resp.status);
+        setErrorOccurred?.(true);
+        continue;
+      }
+
+      const json = await resp.json();
+      let replyRaw =
+        json.choices?.[0]?.message?.content?.trim() ||
+        json.choices?.[0]?.text?.trim() ||
+        "";
+
+      if (/^```/m.test(replyRaw)) {
+        replyRaw = replyRaw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+      }
+
+      // --- UPDATED FALLBACK PARSING ---
+      let parsedReply;
+      try {
+        parsedReply = JSON.parse(replyRaw);
+      } catch {
+        const phoneMatches = replyRaw.match(/\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) || [];
+        const phoneText = phoneMatches.join(", ");
+        const sigMatch = replyRaw.match(/(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i);
+        const signature = sigMatch ? sigMatch[0].trim() : "";
+
+        // New: Detect address patterns in signature
+        const addressMatch = signature.match(
+          /\d{1,5}\s+[\w\s.,'-]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Parkway|Pkwy|Suite|Ste|Unit)?[\s,]*[\w\s.,'-]*(\d{5}(-\d{4})?|[A-Z]{2}\s*\d{4,5})?/i
+        );
+        const address = addressMatch ? addressMatch[0].trim() : "";
+
+        const reply = sigMatch ? replyRaw.replace(sigMatch[0], "").trim() : replyRaw.trim();
+        parsedReply = { reply, phone_number: phoneText, signature, address };
+      }
+
+      const reply = parsedReply.reply?.trim() || "";
+      const phoneNumbers = Array.isArray(parsedReply.phone_number)
+        ? parsedReply.phone_number.join(", ")
+        : parsedReply.phone_number?.trim() || "";
+      const signature = parsedReply.signature?.trim() || "";
+      const address = parsedReply.address?.trim() || "";
+
+      const isValidShortReply =
+        reply.length > 0 ||
+        (cleanedContent.length <= 100 && /\w/.test(cleanedContent));
+
+      if (isValidShortReply) {
+        setErrorOccurred?.(false);
+        return normalizeSchema({
+          reply: reply || cleanedContent,
+          phone_numbers: phoneNumbers,
+          signature,
+          address,
+        });
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_BASE + attempt * 1000;
+        console.warn(`Empty or invalid reply. Retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+
+    console.warn("All attempts failed. Returning minimal content fallback.");
+    return normalizeSchema({
+      reply: cleanedContent,
+      phone_numbers: "",
+      signature: "",
+      address: "",
+    });
+  } catch (err) {
+    console.error("Error calling OpenRouter:", err.message);
+    setErrorOccurred?.(true);
+    setErrorContext?.(err.message);
+    return normalizeSchema({});
+  }
+}
+
 
 
 
@@ -562,4 +752,4 @@ async function scrapeWebsite(targetUrl, apiKey, postParams = {}) {
   }
 }
 
-module.exports = { extractReply, extractBusinessDescription, scrapeWebsite };
+module.exports = { extractReplyEmail, extractBusinessDescription, scrapeWebsite, extractReply };

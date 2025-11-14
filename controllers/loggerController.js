@@ -49,89 +49,108 @@ class loggerController {
     }
   };
 
-  getAllLogs = async (req, res) => {
+getAllLogs = async (req, res) => {
   console.log("GET ALL LOGS");
+
   try {
+    let { startDate, endDate } = req.query;
+
+    console.log("startDate:", startDate);
+    console.log("endDate:", endDate);
+
+    // Optional default behavior: if only one date is provided, auto-complete the range
+    if (startDate && !endDate) {
+      endDate = startDate;
+    }
+    if (!startDate && endDate) {
+      startDate = endDate;
+    }
+
+    // Build WHERE clause dynamically
+    let whereClause = "";
+    const params = [];
+
+    if (startDate && endDate) {
+      params.push(startDate, endDate);
+      whereClause = `WHERE actual_date BETWEEN $1 AND $2`;
+    }
+
     const query = `
-      SELECT 
-        COALESCE(date, date_total) AS date,
-        COALESCE(approved, 0) AS approved,
-        COALESCE(fetched, 0) AS fetched,
-        COALESCE(appended, 0) AS appended,
-        COALESCE(total_fetched, 0) AS total_fetched,
-        COALESCE(classified_offers, 0) AS offers,
-        COALESCE(classified_sba, 0) AS sba,
-        COALESCE(classified_partnership, 0) AS partnership
-      FROM (
-        -- Main combined data (approved, fetched_interested, appended)
+      WITH final AS (
         SELECT 
-          date,
-          SUM(approved) AS approved,
-          SUM(fetched) AS fetched,
-          SUM(appended) AS appended
+          COALESCE(combined.date, totals.date_total) AS actual_date,
+          COALESCE(combined.approved, 0) AS approved,
+          COALESCE(combined.fetched, 0) AS fetched,
+          COALESCE(combined.appended, 0) AS appended,
+          COALESCE(totals.total_fetched, 0) AS total_fetched,
+          COALESCE(classified.classified_offers, 0) AS offers,
+          COALESCE(classified.classified_sba, 0) AS sba,
+          COALESCE(classified.classified_partnership, 0) AS partnership
         FROM (
-          SELECT approval_date AS date, approved_count AS approved, 0 AS fetched, 0 AS appended
-          FROM approved_encoding_lead
-          UNION ALL
-          SELECT date_fetched AS date, 0, fetched_count, 0
-          FROM fetched_interested_lead
-          UNION ALL
-          SELECT appended_date AS date, 0, 0, appended_count
-          FROM appended_to_crm
-        ) AS base
-        GROUP BY date
-      ) AS combined
-      FULL OUTER JOIN (
-        -- Separate fetched_leads total
-        SELECT 
-          date_fetched AS date_total,
-          fetched_count AS total_fetched
-        FROM fetched_leads
-      ) AS totals
-      ON combined.date = totals.date_total
-      LEFT JOIN (
-        -- Pivot classified_interest_replies into columns
-        SELECT 
-          date_fetched,
-          SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS classified_offers,
-          SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS classified_sba,
-          SUM(CASE WHEN type = 'partnership' THEN fetched_count ELSE 0 END) AS classified_partnership
-        FROM classified_interest_replies
-        GROUP BY date_fetched
-      ) AS classified
-      ON COALESCE(combined.date, totals.date_total) = classified.date_fetched
-      ORDER BY COALESCE(date, date_total);
+          SELECT 
+            date,
+            SUM(approved) AS approved,
+            SUM(fetched) AS fetched,
+            SUM(appended) AS appended
+          FROM (
+            SELECT approval_date AS date, approved_count AS approved, 0 AS fetched, 0 AS appended
+            FROM approved_encoding_lead
+            UNION ALL
+            SELECT date_fetched AS date, 0, fetched_count, 0
+            FROM fetched_interested_lead
+            UNION ALL
+            SELECT appended_date AS date, 0, 0, appended_count
+            FROM appended_to_crm
+          ) AS base
+          GROUP BY date
+        ) combined
+        FULL OUTER JOIN (
+          SELECT date_fetched AS date_total, fetched_count AS total_fetched
+          FROM fetched_leads
+        ) totals
+          ON combined.date = totals.date_total
+        LEFT JOIN (
+          SELECT 
+            date_fetched,
+            SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS classified_offers,
+            SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS classified_sba,
+            SUM(CASE WHEN type = 'partnership' THEN fetched_count ELSE 0 END) AS classified_partnership
+          FROM classified_interest_replies
+          GROUP BY date_fetched
+        ) classified
+          ON COALESCE(combined.date, totals.date_total) = classified.date_fetched
+      )
+      SELECT *
+      FROM final
+      ${whereClause}
+      ORDER BY actual_date;
     `;
 
-    const result = await con.query(query);
+    const { rows } = await con.query(query, params);
 
-    // Separate logs and encodingClassification
-    const logs = [];
-    const encodingClassification = [];
+    const logs = rows.map(r => ({
+      date: r.actual_date,
+      approved: r.approved,
+      fetched: r.fetched,
+      appended: r.appended,
+      total_fetched: r.total_fetched
+    }));
 
-    result.rows.forEach(row => {
-      logs.push({
-        date: row.date,
-        approved: row.approved,
-        fetched: row.fetched,
-        appended: row.appended,
-        total_fetched: row.total_fetched
-      });
+    const encodingClassification = rows.map(r => ({
+      date: r.actual_date,
+      offers: r.offers,
+      sba: r.sba,
+      partnership: r.partnership
+    }));
 
-      encodingClassification.push({
-        date: row.date,
-        offers: row.offers,
-        sba: row.sba,
-        partnership: row.partnership
-      });
-    });
+    return responseReturn(res, 200, { logs, encodingClassification });
 
-    responseReturn(res, 200, { logs, encodingClassification });
   } catch (err) {
-    console.error("DB Fetch Error:", err);
-    responseReturn(res, 500, { error: "Failed to fetch logs" });
+    console.error("DB Fetch Error:", err.message);
+    return responseReturn(res, 500, { error: "Failed to fetch logs" });
   }
 };
+
 
 
   getAllTobeEncodedLeads = async (req, res) => {

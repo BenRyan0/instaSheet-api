@@ -4,6 +4,7 @@ const redisClient = require("../../config/redisClient");
 const { emitProgress } = require("../../events/progressEmitter");
 const {
   fetchAndNormalizeLeads,
+  fetchAndNormalizeLeadDetails,
 } = require("../../services/instantly/lead/normalizeService");
 const { getAuthHeaders } = require("../../utils/auth");
 const {
@@ -35,6 +36,10 @@ const {
   default: flushToRedis,
   flushLocalCacheToRedis,
 } = require("../../services/Redis/flushToRedis");
+
+// TOP DEL
+const axios = require("axios");
+const { leadReplyDataMapper, ReplyDataMapper } = require("../../mappers/sheetRow");
 
 class instantlyAiController {
   // main method for manual processing of the lead replies
@@ -146,7 +151,7 @@ class instantlyAiController {
           seen,
           spreadsheetId,
           sheetNames,
-          {runCtx}
+          { runCtx }
         );
 
         console.log(colorize(`[ lead count ${newLeads.length}]`, "lightCyan"));
@@ -217,6 +222,168 @@ class instantlyAiController {
         console.log(`Clearing run context for ${runCtx.runId}`);
         clearRunContext(runCtx.runId);
       }
+    }
+  };
+
+  getLeadDetails = async (req, res) => {
+    const { leadEmail } = req.body;
+
+    if (!leadEmail) {
+      return responseReturn(res, 400, { message: "leadEmail is required" });
+    }
+
+    const authHeaders = getAuthHeaders(env.INSTANTLY_API_KEY);
+    console.log(`Fetching details for lead email: ${leadEmail}`);
+
+    const state = initState({
+      initialSeenCount: 0,
+      maxEmails: 0,
+      maxPages: 0,
+      aiInterestThreshold: 0,
+      runId: "manual_fetch_lead_details",
+    });
+
+    try {
+      let lead = await this.getLeadDetail(leadEmail, authHeaders);
+      let email = null;
+
+      if (lead) {
+        console.log(`Lead found for ${leadEmail}`);
+        email = await this.getLeadEmailReply(lead, authHeaders);
+      } else {
+        console.log(
+          `No lead found for ${leadEmail}, fetching by email instead...`
+        );
+        email = await this.getLeadEmailReply1(leadEmail, authHeaders);
+      }
+
+      console.log("Lead data:", lead || leadEmail);
+      console.log("Lead reply:", email);
+
+      let row = null;
+      let type = null;
+
+      if (email && lead) {
+        // Both lead and email exist
+        console.log("Processing with leadReplyDataMapper (lead + email)...");
+        row = await leadReplyDataMapper({
+          lead,
+          email,
+          setErrorOccurred: state.setErrorOccurred,
+          setErrorContext: state.setErrorContext,
+        });
+        type = "lead_and_email";
+      } else if (email && !lead) {
+        // Only email exists, no lead
+        console.log("Processing with leadReplyDataMapper1 (email only)...");
+        row = await ReplyDataMapper({
+          email,
+          setErrorOccurred: state.setErrorOccurred,
+          setErrorContext: state.setErrorContext,
+        });
+        type = "email_only";
+      } else {
+        console.log("No email or lead data found to process.");
+        return responseReturn(res, 400, {
+          error: "No valid data to process (missing email and lead)",
+        });
+      }
+
+      console.log("Mapped row data:");
+      console.log(row)
+
+      return responseReturn(res, 200, {
+        message: "Lead details fetched successfully",
+        row,
+        type
+      });
+    } catch (error) {
+      console.error("Error fetching lead details:", error.message || error);
+      return responseReturn(res, 500, {
+        error: "Failed to fetch lead details",
+      });
+    }
+  };
+
+  getLeadDetail = async (leadEmail, authHeaders) => {
+    try {
+      const response = await axios.post(
+        "https://api.instantly.ai/api/v2/leads/list",
+        { contacts: leadEmail, limit: 1 },
+        { headers: { ...authHeaders, "Content-Type": "application/json" } }
+      );
+
+      const data = response.data;
+      const lead = data && data.items && data.items[0] ? data.items[0] : null;
+
+      if (!lead) console.log(`No lead data returned for ${leadEmail}`);
+      return lead;
+    } catch (error) {
+      console.error("Error fetching lead detail:", error.message || error);
+      return null;
+    }
+  };
+
+  getLeadEmailReply = async (lead, authHeaders) => {
+    try {
+      const leadEmail =
+        (lead && lead.email) || (lead.payload && lead.payload.email);
+      if (!leadEmail) {
+        console.log("No valid email found for lead.");
+        return null;
+      }
+
+      const response = await axios.get(
+        "https://api.instantly.ai/api/v2/emails",
+        {
+          headers: authHeaders,
+          params: {
+            lead: leadEmail,
+            email_type: "received",
+            sort_order: "desc",
+            limit: 1,
+          },
+        }
+      );
+
+      const data = response.data;
+      const reply = data && data.items && data.items[0] ? data.items[0] : null;
+
+      if (!reply) console.log(`No email replies found for ${leadEmail}`);
+      return reply;
+    } catch (error) {
+      console.error("Error fetching lead email reply:", error.message || error);
+      return null;
+    }
+  };
+  getLeadEmailReply1 = async (leadEmail, authHeaders) => {
+    try {
+      if (!leadEmail) {
+        console.log("No valid email found for lead.");
+        return null;
+      }
+
+      const response = await axios.get(
+        "https://api.instantly.ai/api/v2/emails",
+        {
+          headers: authHeaders,
+          params: {
+            lead: leadEmail,
+            email_type: "received",
+            sort_order: "desc",
+            limit: 1,
+          },
+        }
+      );
+
+      const data = response.data;
+      const reply = data && data.items && data.items[0] ? data.items[0] : null;
+
+      if (!reply) console.log(`No email replies found for ${leadEmail}`);
+      return reply;
+    } catch (error) {
+      console.error("Error fetching lead email reply:", error.message || error);
+      return null;
     }
   };
 

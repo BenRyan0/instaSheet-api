@@ -1,5 +1,8 @@
 // mapToSheetRow.js
-const { extractReply } = require("../services/emailParserService");
+const {
+  extractReply,
+  extractReplyEmail,
+} = require("../services/emailParserService");
 const { extractPhoneFromText, splitOnParagraphs } = require("../utils/regex");
 const { colorize } = require("../utils/colorLogger");
 const env = require("../env");
@@ -39,6 +42,23 @@ function parseName(lead, email) {
     firstName ||= parts[0] || "";
     lastName ||= parts.slice(1).join(" ") || "";
   }
+
+  // Try from email.from_address_json
+  if ((!firstName || !lastName) && Array.isArray(email?.from_address_json)) {
+    const fromName = email.from_address_json[0]?.name || "";
+    if (fromName) {
+      const parts = fromName.trim().split(/\s+/);
+      firstName ||= parts[0] || "";
+      lastName ||= parts.slice(1).join(" ") || "";
+    }
+  }
+
+  return { firstName, lastName };
+}
+
+function parseNameFromEmail(email) {
+  let firstName = "";
+  let lastName = "";
 
   // Try from email.from_address_json
   if ((!firstName || !lastName) && Array.isArray(email?.from_address_json)) {
@@ -153,6 +173,54 @@ function buildSheetRow({
     "status after the call": "none",
   };
 }
+function buildSheetRowEmailAndLead({
+  extracted,
+  lead,
+  email,
+  firstName,
+  lastName,
+  phone1,
+  phone2,
+  salesPerson,
+  salesPersonEmail,
+}) {
+  const payload = lead?.payload || {};
+  const leadEmail = lead?.email || lead?.lead || email?.lead || "";
+  const phoneFromEmail = extractPhoneFromText(extracted.reply);
+  const emailSignature = extracted.signature || "";
+
+  return {
+    "Email Sender": `${salesPerson} : ${salesPersonEmail}`,
+    "Email From": `${firstName} ${lastName} : ${leadEmail}`,
+    Response: extracted.reply || "",
+    "Email Signature": extracted.signature || emailSignature || "none",
+    Address: extracted.address || "none",
+    "Phone Number:": phoneFromEmail || phone1 || "none",
+    "Website:": lead?.website || payload.website || "none",
+  };
+}
+function buildSheetRowEmailOnly({
+  extracted,
+  email,
+  firstName,
+  lastName,
+  phone1,
+  salesPerson,
+  salesPersonEmail,
+}) {
+  const leadEmail = email?.lead || "";
+  const emailSignature = extracted.signature || "";
+
+  return {
+    "Email Sender": `${salesPerson} : ${salesPersonEmail}`,
+    "Email From": `${firstName} ${lastName} : ${leadEmail}`,
+    Response: extracted.reply || "",
+    "Email Signature": extracted.signature || emailSignature || "none",
+    Address: extracted.address || "none",
+    "Phone Number:": phone1 || "none",
+    "Website:": "none",
+  };
+}
 
 // Main function
 async function mapToSheetRow({
@@ -207,4 +275,100 @@ async function mapToSheetRow({
   }
 }
 
-module.exports = { mapToSheetRow };
+// ONE LEAD DATA EXTRACTION
+async function leadReplyDataMapper({
+  lead,
+  email,
+  setErrorOccurred,
+  setErrorContext,
+}) {
+  try {
+    // console.log(colorize("LEAD", "cyan"), lead);
+    // console.log(colorize("EMAIL", "cyan"), email);
+    const emailBodyText = email?.body?.text || "";
+
+    // Step 1: Validate email body
+    const validEmailBody = validateEmailBody(emailBodyText);
+
+    // Step 2: Extract reply using AI
+    const extracted = await extractReply({
+      emailContent: validEmailBody,
+      content_preview: email.content_preview || "",
+      setErrorOccurred,
+      setErrorContext,
+    });
+
+    console.log(colorize("Extracted Email Content", "cyan"), extracted.reply);
+
+    // Step 3: Extract structured info
+    const { firstName, lastName } = parseNameFromEmail(email);
+    const { phone1, phone2 } = extractPhones(lead);
+    const { salesPerson, salesPersonEmail } = extractSalesPerson(email);
+
+    // Step 4: Build final row
+    return buildSheetRowEmailAndLead({
+      extracted,
+      lead,
+      email,
+      firstName,
+      lastName,
+      phone1,
+      phone2,
+      salesPerson,
+      salesPersonEmail,
+    });
+  } catch (error) {
+    console.error(
+      `mapToSheetRow error (${lead?.email || "unknown lead"}):`,
+      error.message
+    );
+    setErrorOccurred(true);
+    setErrorContext(`mapToSheetRow: ${error.message}`);
+    return null;
+  }
+}
+async function ReplyDataMapper({ email, setErrorOccurred, setErrorContext }) {
+  try {
+    // console.log(colorize("LEAD", "cyan"), lead);
+    // console.log(colorize("EMAIL", "cyan"), email);
+    const emailBodyText = email?.body?.text || "";
+
+    // Step 1: Validate email body
+    const validEmailBody = validateEmailBody(emailBodyText);
+
+    // Step 2: Extract reply using AI
+
+    const extracted = await extractReplyEmail({
+      emailContent: validEmailBody,
+      content_preview: email.content_preview || "",
+      setErrorOccurred,
+      setErrorContext,
+    });
+
+    console.log(colorize("Extracted Email Content", "cyan"), extracted.reply);
+
+    // Step 3: Extract structured info
+    const { firstName, lastName } = parseNameFromEmail(email);
+    const phone1 = extracted.phone_numbers || "";
+
+    const { salesPerson, salesPersonEmail } = extractSalesPerson(email);
+
+    // Step 4: Build final row
+    return buildSheetRowEmailOnly({
+      extracted,
+      email,
+      firstName,
+      lastName,
+      phone1,
+      salesPerson,
+      salesPersonEmail,
+    });
+  } catch (error) {
+    console.error(`mapToSheetRow error`, error.message);
+    setErrorOccurred(true);
+    setErrorContext(`mapToSheetRow: ${error.message}`);
+    return null;
+  }
+}
+
+module.exports = { mapToSheetRow, leadReplyDataMapper, ReplyDataMapper };

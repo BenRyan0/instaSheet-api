@@ -91,10 +91,32 @@ async function fetchAndNormalizeLeadsWebhook({
   }
 }
 
+async function fetchAndNormalizeLeadDetails({
+  opts,
+  authHeaders,
+  runContext,
+}) {
+  try { 
+    const page = await fetchLeadsPageWebhook({
+      pageLimit: opts.pageLimit,
+      authHeaders,
+      setErrorOccurred: (val) => (runContext.errorOccurred = val),
+      setErrorContext: (ctx) => (runContext.errorContext = ctx),
+    });
+    return normalizeLeadsArray(page);
+  } catch (err) {
+    console.error("fetchAndNormalizeLeadsWebhook failed:", err.message);
+    runContext.errorOccurred = true;
+    runContext.errorContext = err.message;
+    return [];
+  }
+}
+
 
 module.exports = {
   normalizeRow,
   normalizeLeadsArray,
   fetchAndNormalizeLeads,
-  fetchAndNormalizeLeadsWebhook
+  fetchAndNormalizeLeadsWebhook,
+  fetchAndNormalizeLeadDetails
 };

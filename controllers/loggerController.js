@@ -59,17 +59,22 @@ class loggerController {
       console.log("endDate:", endDate);
 
       // Optional default behavior: if only one date is provided, auto-complete the range
-      if (startDate && !endDate) {
-        endDate = startDate;
-      }
-      if (!startDate && endDate) {
-        startDate = endDate;
-      }
+      if (startDate && !endDate) endDate = startDate;
+      if (!startDate && endDate) startDate = endDate;
+
+      const toPHTDateString = (dateStr) => {
+        const dateObj = new Date(dateStr);
+        // Convert to PHT (UTC+8)
+        const pht = new Date(dateObj.getTime() + 8 * 60 * 60 * 1000);
+        return pht.toISOString().slice(0, 10); // YYYY-MM-DD
+      };
+
+      if (startDate) startDate = toPHTDateString(startDate);
+      if (endDate) endDate = toPHTDateString(endDate);
 
       // Build WHERE clause dynamically
       let whereClause = "";
       const params = [];
-
       if (startDate && endDate) {
         params.push(startDate, endDate);
         whereClause = `WHERE actual_date BETWEEN $1 AND $2`;
@@ -149,18 +154,29 @@ class loggerController {
       return responseReturn(res, 500, { error: "Failed to fetch logs" });
     }
   };
+
   getClassificationSummaryByDate = async (req, res) => {
-   try {
-    const { date } = req.query;
+    try {
+      const { date } = req.query;
+      console.log(date, "received date");
 
-    if (!date) {
-      return responseReturn(res, 400, {
-        error: "date query parameter is required",
-      });
-    }
+      if (!date) {
+        return responseReturn(res, 400, {
+          error: "date query parameter is required",
+        });
+      }
 
-    // 1️⃣ Summary for the given date
-    const perDateQuery = `
+      // Convert incoming date to a JS Date object
+      const inputDate = new Date(date);
+
+      // Adjust to PHT (UTC+8)
+      const phtTime = new Date(inputDate.getTime() + 8 * 60 * 60 * 1000);
+
+      // Extract YYYY-MM-DD for query
+      const phtDate = phtTime.toISOString().slice(0, 10);
+
+      //  Summary for the given date (PHT)
+      const perDateQuery = `
       SELECT
         SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS offers,
         SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS sba,
@@ -169,16 +185,16 @@ class loggerController {
       WHERE date_fetched = $1::date;
     `;
 
-    const { rows: perDateRows } = await con.query(perDateQuery, [date]);
-    const perDateRow = perDateRows[0];
+      const { rows: perDateRows } = await con.query(perDateQuery, [phtDate]);
+      const perDateRow = perDateRows[0];
 
-    const totalForDate =
-      (Number(perDateRow.offers) || 0) +
-      (Number(perDateRow.sba) || 0) +
-      (Number(perDateRow.partnership) || 0);
+      const totalForDate =
+        (Number(perDateRow.offers) || 0) +
+        (Number(perDateRow.sba) || 0) +
+        (Number(perDateRow.partnership) || 0);
 
-    // 2️⃣ Total across all dates
-    const totalQuery = `
+      // Total across all dates
+      const totalQuery = `
       SELECT
         SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS offers,
         SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS sba,
@@ -186,39 +202,37 @@ class loggerController {
       FROM classified_interest_replies;
     `;
 
-    const { rows: totalRows } = await con.query(totalQuery);
-    const totalRow = totalRows[0];
+      const { rows: totalRows } = await con.query(totalQuery);
+      const totalRow = totalRows[0];
 
-    const result = {
-      perDate: [
-        {
-          date,
-          offers: Number(perDateRow.offers) || 0,
-          sba: Number(perDateRow.sba) || 0,
-          partnership: Number(perDateRow.partnership) || 0,
-          total: totalForDate
-        }
-      ],
-      totalByCategory: {
-        offers: Number(totalRow.offers) || 0,
-        sba: Number(totalRow.sba) || 0,
-        partnership: Number(totalRow.partnership) || 0
-      }
-    };
+      const result = {
+        perDate: [
+          {
+            date: phtDate,
+            offers: Number(perDateRow.offers) || 0,
+            sba: Number(perDateRow.sba) || 0,
+            partnership: Number(perDateRow.partnership) || 0,
+            total: totalForDate,
+          },
+        ],
+        totalByCategory: {
+          offers: Number(totalRow.offers) || 0,
+          sba: Number(totalRow.sba) || 0,
+          partnership: Number(totalRow.partnership) || 0,
+        },
+      };
 
-    return responseReturn(res, 200, result);
-
-  } catch (err) {
-    console.error("DB Error:", err.message);
-    return responseReturn(res, 500, { error: "Failed to fetch data" });
-  }
-};
-
+      return responseReturn(res, 200, result);
+    } catch (err) {
+      console.error("DB Error:", err.message);
+      return responseReturn(res, 500, { error: "Failed to fetch data" });
+    }
+  };
 
   getAllLogsTable = async (req, res) => {
-  console.log("GET ALL LOGS (TABLE FORMAT)");
-  try {
-    const query = `
+    console.log("GET ALL LOGS (TABLE FORMAT)");
+    try {
+      const query = `
       SELECT 
         COALESCE(date, date_total) AS date,
         COALESCE(approved, 0) AS approved,
@@ -269,36 +283,35 @@ class loggerController {
       ORDER BY COALESCE(date, date_total);
     `;
 
-    const result = await con.query(query);
+      const result = await con.query(query);
 
-    // Separate logs and encodingClassification
-    const logs = [];
-    const encodingClassification = [];
+      // Separate logs and encodingClassification
+      const logs = [];
+      const encodingClassification = [];
 
-    result.rows.forEach(row => {
-      logs.push({
-        date: row.date,
-        approved: row.approved,
-        fetched: row.fetched,
-        appended: row.appended,
-        total_fetched: row.total_fetched
+      result.rows.forEach((row) => {
+        logs.push({
+          date: row.date,
+          approved: row.approved,
+          fetched: row.fetched,
+          appended: row.appended,
+          total_fetched: row.total_fetched,
+        });
+
+        encodingClassification.push({
+          date: row.date,
+          offers: row.offers,
+          sba: row.sba,
+          partnership: row.partnership,
+        });
       });
 
-      encodingClassification.push({
-        date: row.date,
-        offers: row.offers,
-        sba: row.sba,
-        partnership: row.partnership
-      });
-    });
-
-    responseReturn(res, 200, { logs, encodingClassification });
-  } catch (err) {
-    
-    console.error("DB Fetch Error:", err);
-    responseReturn(res, 500, { error: "Failed to fetch logs" });
-  }
-};
+      responseReturn(res, 200, { logs, encodingClassification });
+    } catch (err) {
+      console.error("DB Fetch Error:", err);
+      responseReturn(res, 500, { error: "Failed to fetch logs" });
+    }
+  };
 
   getAllTobeEncodedLeads = async (req, res) => {
     console.log("GET ALL TO BE ENCODED LEADS");

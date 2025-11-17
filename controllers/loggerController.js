@@ -149,6 +149,71 @@ class loggerController {
       return responseReturn(res, 500, { error: "Failed to fetch logs" });
     }
   };
+  getClassificationSummaryByDate = async (req, res) => {
+   try {
+    const { date } = req.query;
+
+    if (!date) {
+      return responseReturn(res, 400, {
+        error: "date query parameter is required",
+      });
+    }
+
+    // 1️⃣ Summary for the given date
+    const perDateQuery = `
+      SELECT
+        SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS offers,
+        SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS sba,
+        SUM(CASE WHEN type = 'partnership' THEN fetched_count ELSE 0 END) AS partnership
+      FROM classified_interest_replies
+      WHERE date_fetched = $1::date;
+    `;
+
+    const { rows: perDateRows } = await con.query(perDateQuery, [date]);
+    const perDateRow = perDateRows[0];
+
+    const totalForDate =
+      (Number(perDateRow.offers) || 0) +
+      (Number(perDateRow.sba) || 0) +
+      (Number(perDateRow.partnership) || 0);
+
+    // 2️⃣ Total across all dates
+    const totalQuery = `
+      SELECT
+        SUM(CASE WHEN type = 'offers' THEN fetched_count ELSE 0 END) AS offers,
+        SUM(CASE WHEN type = 'sba' THEN fetched_count ELSE 0 END) AS sba,
+        SUM(CASE WHEN type = 'partnership' THEN fetched_count ELSE 0 END) AS partnership
+      FROM classified_interest_replies;
+    `;
+
+    const { rows: totalRows } = await con.query(totalQuery);
+    const totalRow = totalRows[0];
+
+    const result = {
+      perDate: [
+        {
+          date,
+          offers: Number(perDateRow.offers) || 0,
+          sba: Number(perDateRow.sba) || 0,
+          partnership: Number(perDateRow.partnership) || 0,
+          total: totalForDate
+        }
+      ],
+      totalByCategory: {
+        offers: Number(totalRow.offers) || 0,
+        sba: Number(totalRow.sba) || 0,
+        partnership: Number(totalRow.partnership) || 0
+      }
+    };
+
+    return responseReturn(res, 200, result);
+
+  } catch (err) {
+    console.error("DB Error:", err.message);
+    return responseReturn(res, 500, { error: "Failed to fetch data" });
+  }
+};
+
 
   getAllLogsTable = async (req, res) => {
   console.log("GET ALL LOGS (TABLE FORMAT)");

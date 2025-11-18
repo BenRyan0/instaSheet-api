@@ -43,7 +43,8 @@ class spreadSheetsController {
 
       // Step 2: If sheet already exists, skip creation
       if (existingSheetNames.includes(sheetName)) {
-        responseReturn(res, 400, {
+
+        return responseReturn(res, 400, {
           error: `Sheet "${sheetName}" already exists in spreadsheet`,
         });
       }
@@ -122,6 +123,73 @@ class spreadSheetsController {
       });
     }
   };
+
+GetRowCountMultiple = async (req, res) => {
+  try {
+    const { spreadsheetId } = req.query;
+    const { sheetNames } = req.body;
+
+    console.log(req.query)
+    console.log(req.body)
+
+    if (!spreadsheetId || !Array.isArray(sheetNames) || sheetNames.length === 0) {
+      return res.status(400).json({
+        error: "spreadsheetId and sheetNames[] are required",
+      });
+    }
+
+    const { sheets } = await initGoogleClients();
+
+    // Run sheet requests in parallel for performance
+    const results = await Promise.all(
+      sheetNames.map(async (sheetName) => {
+        try {
+          // Fetch values
+          const response = await sheets.spreadsheets.values.get({
+            spreadsheetId,
+            range: sheetName, // let Google auto-detect the full range
+          });
+
+          const rows = response.data.values || [];
+
+          // Count non-empty rows
+          const rowCount = rows.filter(
+            (row) =>
+              row.some((cell) => cell?.toString().trim() !== "")
+          ).length;
+
+          return {
+            sheetName,
+            rowCount,
+          };
+
+        } catch (err) {
+          // Handle missing or inaccessible sheet
+          return {
+            sheetName,
+            rowCount: 0,
+            error: err.response?.data?.error?.message || "Failed to read sheet",
+          };
+        }
+      })
+    );
+
+
+    return responseReturn(res, 200,results)
+    // return res.json(results);
+
+  } catch (error) {
+    console.error("Error fetching row counts:", error.response?.data || error.message);
+    return responseReturn(res, 500,{
+      error: "Failed to fetch batch row counts"
+    })
+    // return res.status(500).json({
+    //   error: "Failed to fetch batch row counts",
+    //   details: error.response?.data?.error?.message || error.message,
+    // });
+  }
+};
+
 }
 
 module.exports = new spreadSheetsController();

@@ -9,6 +9,7 @@ router.get("/log/get-all-logs-table", loggerController.getAllLogsTable);
 router.get("/tobeencoded-leads", loggerController.getAllTobeEncodedLeads);
 
 
+
 router.post("/lead/deny", markToBeApprovedLead);
 
 router.post("/lead/approve", async (req, res) => {

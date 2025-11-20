@@ -4,7 +4,7 @@ const { colorize } = require("../utils/colorLogger");
 const { Firecrawl } = require("firecrawl");
 
 const firecrawl = new Firecrawl({
-  apiKey: env.FIRECRAWL_API
+  apiKey: env.FIRECRAWL_API,
 });
 
 function cleanEmailContent(rawEmail, maxWords = 100) {
@@ -262,7 +262,9 @@ async function extractReply({
       cleanedContent = cleanEmailContent(cleanedContent, 100);
       console.log(colorize("CleanedContent", "cyan"), cleanedContent);
     } else {
-      console.log(`Skipping cleanEmailContent — only ${wordCount} words detected.`);
+      console.log(
+        `Skipping cleanEmailContent — only ${wordCount} words detected.`
+      );
     }
 
     if (!cleanedContent) {
@@ -272,37 +274,82 @@ async function extractReply({
 
     // --- 2. Build prompt ---
     const prompt = `
-      You are an email parsing assistant.
+You are an email reply extraction engine. Your job is to reliably extract the *latest human reply* at the top of an email thread. 
+You must follow the steps EXACTLY. Do not skip steps. Do not infer or guess.
 
-      Task: Extract the **latest human reply** from an email thread, and also extract:
-      - Any phone numbers mentioned (return as a single text string).
-      - The email signature block (if present).
+PROCESSING RULES (DO THESE IN ORDER):
 
-      Rules:
-      1. Find where this content preview first appears: "${content_preview}" (case-insensitive).
-      2. Collect all text until a line that matches patterns like:
-         ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
-         Begin forwarded message, -----Original Message-----
-      3. If such a marker appears on the same line, cut before it.
-      4. Split into:
-         a) Main reply content
-         b) Signature (if detected)
-      5. Signature typically begins with:
-         --, –, —, Thanks,, Thank you,, Best,, Regards,, Sincerely,
-         or contains job title, phone, email, company, or website.
-      6. Remove quoted lines (starting with ">") and collapse blank lines.
-      7. Detect all phone numbers ((xxx) xxx-xxxx, +1 xxx xxx xxxx, etc.).
-         Combine multiple numbers into a comma-separated string.
-      8. If the email appears to contain a short but valid reply (like "Yes please!" or "Sounds good"),
-         treat it as a legitimate reply even if under 20 words.
+1. **Align using the content preview**
+   - Locate the FIRST occurrence of the exact content preview string (case-insensitive) inside the full email content.
+   - The reply ALWAYS begins at that location.
+   - Content preview to align with is:
+     "${content_preview}"
+   - If the content preview is not found, reply begins at the start of the email.
 
-      Output only JSON:
-      {
-        "reply": "cleaned_reply_text_without_signature",
-        "phone_number": "comma-separated phone numbers or empty string",
-        "signature": "signature_text_or_empty_string"
-      }
-    `;
+2. **Find the cutoff point using thread markers**
+   Stop BEFORE the first line that starts with ANY of these (case-insensitive):
+      - "On "
+      - "From:"
+      - "Sent:"
+      - "To:"
+      - "Subject:"
+      - "wrote:"
+      - "Forwarded message"
+      - "Begin forwarded message"
+      - "-----Original Message-----"
+   If a marker appears ON THE SAME LINE as the content preview, cut immediately BEFORE the marker.
+
+3. **Extract the reply block**
+   - The reply is the text between:
+        (reply_start) → (first_marker_before_reply)
+   - Preserve exact text but trim leading and trailing whitespace.
+
+4. **Remove quoted text**
+   - Completely delete all lines beginning with:
+        ">"
+        ">>"
+        "> "
+        ">> "
+   - Do NOT include them in the reply.
+
+5. **Extract phone numbers**
+   - Detect phone numbers in any of these formats:
+        (xxx) xxx-xxxx
+        xxx-xxx-xxxx
+        xxx.xxx.xxxx
+        +1 xxx xxx xxxx
+        +xx xxx xxxx xxxx
+   - Return all unique matches as a comma-separated string.
+   - If no numbers exist, return "".
+
+6. **Extract signature**
+   A signature starts ONLY IF it is on its own separate line AND begins with one of:
+        -- 
+        – 
+        — 
+        Thanks,
+        Thank you,
+        Best,
+        Regards,
+        Sincerely,
+   OR the block contains job title, phone, email, company name, or website.
+   - The signature is everything from that signature line through the end of the reply block.
+   - If no valid signature is found, return "".
+
+7. **Short reply rule**
+   If the extracted reply text contains 1–5 words but is a valid acknowledgement 
+   (e.g., “Yes”, “Okay”, “Sounds good”, “Approved”, “Sure”), it IS a valid reply even if small.
+
+8. **Final formatting**
+   Output ONLY valid JSON in this exact structure:
+   {
+     "reply": "cleaned_reply_without_signature",
+     "phone_numbers": "comma-separated numbers or empty string",
+     "signature": "signature_text_or_empty_string"
+   }
+
+9. **Do NOT return explanations, commentary, reasoning, markdown, or anything else besides the JSON.**
+`;
 
     // --- 3. Loop for retries ---
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -312,7 +359,11 @@ async function extractReply({
         "Content-Type": "application/json",
       };
 
-      console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${attempt + 1}`);
+      console.log(
+        `Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${
+          attempt + 1
+        }`
+      );
 
       const body = JSON.stringify({
         model,
@@ -325,11 +376,15 @@ async function extractReply({
 
       let resp;
       try {
-        resp = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers,
-          body,
-        }, 60000);
+        resp = await fetchWithTimeout(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers,
+            body,
+          },
+          60000
+        );
       } catch (err) {
         console.error("Network or timeout error:", err.message);
         setErrorOccurred?.(true);
@@ -361,7 +416,10 @@ async function extractReply({
 
       // --- 5. Clean markdown JSON wrappers ---
       if (/^```/m.test(replyRaw)) {
-        replyRaw = replyRaw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+        replyRaw = replyRaw
+          .replace(/^```(?:json)?/i, "")
+          .replace(/```$/, "")
+          .trim();
       }
 
       // --- 6. Parse JSON safely ---
@@ -369,13 +427,18 @@ async function extractReply({
       try {
         parsedReply = JSON.parse(replyRaw);
       } catch {
-        const phoneMatches = replyRaw.match(/\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) || [];
+        const phoneMatches =
+          replyRaw.match(
+            /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
+          ) || [];
         const phoneText = phoneMatches.join(", ");
         const sigMatch = replyRaw.match(
           /(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i
         );
         const signature = sigMatch ? sigMatch[0].trim() : "";
-        const reply = sigMatch ? replyRaw.replace(sigMatch[0], "").trim() : replyRaw.trim();
+        const reply = sigMatch
+          ? replyRaw.replace(sigMatch[0], "").trim()
+          : replyRaw.trim();
         parsedReply = { reply, phone_number: phoneText, signature };
       }
 
@@ -451,7 +514,9 @@ async function extractReplyEmail({
       cleanedContent = cleanEmailContent(cleanedContent, 100);
       console.log(colorize("CleanedContent", "cyan"), cleanedContent);
     } else {
-      console.log(`Skipping cleanEmailContent — only ${wordCount} words detected.`);
+      console.log(
+        `Skipping cleanEmailContent — only ${wordCount} words detected.`
+      );
     }
 
     if (!cleanedContent) {
@@ -460,38 +525,83 @@ async function extractReplyEmail({
     }
 
     // --- UPDATED PROMPT ---
-    const prompt = `
-      You are an email parsing assistant.
+     const prompt = `
+You are an email reply extraction engine. Your job is to reliably extract the *latest human reply* at the top of an email thread. 
+You must follow the steps EXACTLY. Do not skip steps. Do not infer or guess.
 
-      Task: Extract the **latest human reply** from an email thread, and also extract:
-      - Any phone numbers mentioned (return as a single text string).
-      - The email signature block (if present).
-      - The mailing address (if found in the signature).
+PROCESSING RULES (DO THESE IN ORDER):
 
-      Rules:
-      1. Find where this content preview first appears: "${content_preview}" (case-insensitive).
-      2. Collect all text until a line that matches patterns like:
-         ^On\\s, ^From:, ^Sent:, ^To:, ^Subject:, wrote:, Forwarded message,
-         Begin forwarded message, -----Original Message-----
-      3. Split into:
-         a) Main reply content
-         b) Signature (if detected)
-      4. Signature typically begins with:
-         --, –, —, Thanks,, Thank you,, Best,, Regards,, Sincerely,
-         or contains job title, phone, email, company, website, or address.
-      5. Remove quoted lines (starting with ">") and collapse blank lines.
-      6. Detect all phone numbers ((xxx) xxx-xxxx, +1 xxx xxx xxxx, etc.).
-         Combine multiple numbers into a comma-separated string.
-      7. Detect physical addresses (look for street numbers, city/state names, ZIP/postal codes, etc.)
-         and output as a single cleaned text string.
-      8. Output only JSON, like:
-      {
-        "reply": "cleaned_reply_text_without_signature",
-        "phone_number": "comma-separated phone numbers or empty string",
-        "signature": "signature_text_or_empty_string",
-        "address": "address_text_or_empty_string"
-      }
-    `;
+1. **Align using the content preview**
+   - Locate the FIRST occurrence of the exact content preview string (case-insensitive) inside the full email content.
+   - The reply ALWAYS begins at that location.
+   - Content preview to align with is:
+     "${content_preview}"
+   - If the content preview is not found, reply begins at the start of the email.
+
+2. **Find the cutoff point using thread markers**
+   Stop BEFORE the first line that starts with ANY of these (case-insensitive):
+      - "On "
+      - "From:"
+      - "Sent:"
+      - "To:"
+      - "Subject:"
+      - "wrote:"
+      - "Forwarded message"
+      - "Begin forwarded message"
+      - "-----Original Message-----"
+   If a marker appears ON THE SAME LINE as the content preview, cut immediately BEFORE the marker.
+
+3. **Extract the reply block**
+   - The reply is the text between:
+        (reply_start) → (first_marker_before_reply)
+   - Preserve exact text but trim leading and trailing whitespace.
+
+4. **Remove quoted text**
+   - Completely delete all lines beginning with:
+        ">"
+        ">>"
+        "> "
+        ">> "
+   - Do NOT include them in the reply.
+
+5. **Extract phone numbers**
+   - Detect phone numbers in any of these formats:
+        (xxx) xxx-xxxx
+        xxx-xxx-xxxx
+        xxx.xxx.xxxx
+        +1 xxx xxx xxxx
+        +xx xxx xxxx xxxx
+   - Return all unique matches as a comma-separated string.
+   - If no numbers exist, return "".
+
+6. **Extract signature**
+   A signature starts ONLY IF it is on its own separate line AND begins with one of:
+        -- 
+        – 
+        — 
+        Thanks,
+        Thank you,
+        Best,
+        Regards,
+        Sincerely,
+   OR the block contains job title, phone, email, company name, or website.
+   - The signature is everything from that signature line through the end of the reply block.
+   - If no valid signature is found, return "".
+
+7. **Short reply rule**
+   If the extracted reply text contains 1–5 words but is a valid acknowledgement 
+   (e.g., “Yes”, “Okay”, “Sounds good”, “Approved”, “Sure”), it IS a valid reply even if small.
+
+8. **Final formatting**
+   Output ONLY valid JSON in this exact structure:
+   {
+     "reply": "cleaned_reply_without_signature",
+     "phone_numbers": "comma-separated numbers or empty string",
+     "signature": "signature_text_or_empty_string"
+   }
+
+9. **Do NOT return explanations, commentary, reasoning, markdown, or anything else besides the JSON.**
+`;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const keyIndex = attempt % apiKeys.length;
@@ -500,7 +610,11 @@ async function extractReplyEmail({
         "Content-Type": "application/json",
       };
 
-      console.log(`Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${attempt + 1}`);
+      console.log(
+        `Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${
+          attempt + 1
+        }`
+      );
 
       const body = JSON.stringify({
         model,
@@ -513,11 +627,15 @@ async function extractReplyEmail({
 
       let resp;
       try {
-        resp = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers,
-          body,
-        }, 60000);
+        resp = await fetchWithTimeout(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers,
+            body,
+          },
+          60000
+        );
       } catch (err) {
         console.error("Network or timeout error:", err.message);
         setErrorOccurred?.(true);
@@ -545,7 +663,10 @@ async function extractReplyEmail({
         "";
 
       if (/^```/m.test(replyRaw)) {
-        replyRaw = replyRaw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+        replyRaw = replyRaw
+          .replace(/^```(?:json)?/i, "")
+          .replace(/```$/, "")
+          .trim();
       }
 
       // --- UPDATED FALLBACK PARSING ---
@@ -553,9 +674,14 @@ async function extractReplyEmail({
       try {
         parsedReply = JSON.parse(replyRaw);
       } catch {
-        const phoneMatches = replyRaw.match(/\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) || [];
+        const phoneMatches =
+          replyRaw.match(
+            /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
+          ) || [];
         const phoneText = phoneMatches.join(", ");
-        const sigMatch = replyRaw.match(/(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i);
+        const sigMatch = replyRaw.match(
+          /(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i
+        );
         const signature = sigMatch ? sigMatch[0].trim() : "";
 
         // New: Detect address patterns in signature
@@ -564,7 +690,9 @@ async function extractReplyEmail({
         );
         const address = addressMatch ? addressMatch[0].trim() : "";
 
-        const reply = sigMatch ? replyRaw.replace(sigMatch[0], "").trim() : replyRaw.trim();
+        const reply = sigMatch
+          ? replyRaw.replace(sigMatch[0], "").trim()
+          : replyRaw.trim();
         parsedReply = { reply, phone_number: phoneText, signature, address };
       }
 
@@ -611,9 +739,6 @@ async function extractReplyEmail({
   }
 }
 
-
-
-
 function normalizeSchema(obj = {}) {
   console.log(colorize("Extracted Data", "cyan"));
   console.log(obj);
@@ -644,7 +769,6 @@ async function getWebsiteData(url) {
       return null;
     }
 
- 
     const description =
       response.metadata?.description ||
       response.metadata?.ogDescription ||
@@ -684,7 +808,7 @@ async function extractBusinessDescription({
 
       setErrorOccurred?.(false);
 
-      console.log(colorize("DESCRIPTION [EXTRACTED]","green"))
+      console.log(colorize("DESCRIPTION [EXTRACTED]", "green"));
       return description;
     } catch (err) {
       const status = err.response?.status;
@@ -752,4 +876,9 @@ async function scrapeWebsite(targetUrl, apiKey, postParams = {}) {
   }
 }
 
-module.exports = { extractReplyEmail, extractBusinessDescription, scrapeWebsite, extractReply };
+module.exports = {
+  extractReplyEmail,
+  extractBusinessDescription,
+  scrapeWebsite,
+  extractReply,
+};

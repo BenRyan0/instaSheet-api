@@ -34,16 +34,16 @@ const init = (server, options = {}) => {
       return;
     }
 
-    console.log(
-      `Connected: user=${userId}, client=${clientId}, socket=${socket.id}`
-    );
+    // console.log(
+    //   `Connected: user=${userId}, client=${clientId}, socket=${socket.id}`
+    // );
 
     // ---------------------------------------------
     // Handle Reconnection / Duplicate Clients
     // ---------------------------------------------
     const oldSocket = activeClients.get(clientId);
     if (oldSocket && oldSocket.id !== socket.id && oldSocket.connected) {
-      console.log(`Replacing old connection for clientId=${clientId}`);
+      // console.log(`Replacing old connection for clientId=${clientId}`);
       // Gracefully tell old socket to disconnect
       oldSocket.emit("force_disconnect", {
         reason: "Replaced by new connection",
@@ -69,7 +69,7 @@ const init = (server, options = {}) => {
     // Cleanup logic on disconnect
     // ---------------------------------------------
     socket.on("disconnect", (reason) => {
-      console.warn(`Disconnected socket=${socket.id} → ${reason}`);
+      // console.warn(`Disconnected socket=${socket.id} → ${reason}`);
 
       const data = activeSockets.get(socket.id);
       if (data) {
@@ -82,7 +82,7 @@ const init = (server, options = {}) => {
         if (data.clientId) activeClients.delete(data.clientId);
       }
 
-      console.log(`Cleaned up socket=${socket.id}`);
+      // console.log(`Cleaned up socket=${socket.id}`);
     });
 
     // ---------------------------------------------
@@ -96,7 +96,7 @@ const init = (server, options = {}) => {
       if (!socketData) return;
 
       if (socketData.isProcessing) {
-        console.log(`Ignored trigger for ${socket.id} — still processing.`);
+        // console.log(`Ignored trigger for ${socket.id} — still processing.`);
         socket.emit("processing_busy", {
           message: "Still processing previous request",
         });
@@ -104,7 +104,7 @@ const init = (server, options = {}) => {
       }
 
       socketData.isProcessing = true;
-      console.log(`Processing new_email_added for ${socket.id}`);
+      // console.log(`Processing new_email_added for ${socket.id}`);
 
       // Set processing timeout
       const processingTimeout = setTimeout(() => {
@@ -129,7 +129,7 @@ const init = (server, options = {}) => {
           aiInterestThreshold: 1,
         };
 
-        console.log("Payload received:", payload);
+        // console.log("Payload received:", payload);
         const clientId = "webhook-cID-x1";
 
         const summary =
@@ -144,9 +144,9 @@ const init = (server, options = {}) => {
             clientId,
           });
 
-        console.log("summary in socket");
-        console.log(summary);
-        console.log(`Completed encode for ${socket.id}`);
+        // console.log("summary in socket");
+        // console.log(summary);
+        // console.log(`Completed encode for ${socket.id}`);
         io.emit("encoding_progress", {
           message: `${summary.totalEncoded} leads Encoded`,
         });
@@ -161,7 +161,7 @@ const init = (server, options = {}) => {
     });
   });
 
-  console.log("Socket.IO initialized");
+  // console.log("Socket.IO initialized");
   return io;
 };
 

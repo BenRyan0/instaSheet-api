@@ -232,7 +232,8 @@ async function mapToSheetRow({
   try {
     // console.log(colorize("LEAD", "cyan"), lead);
     // console.log(colorize("EMAIL", "cyan"), email);
-    const emailBodyText = email?.body?.text || "";
+    // const emailBodyText = email?.body?.text || "";
+    const emailBodyText = email?.body?.text || email?.content_preview || "";
 
     // Step 1: Validate email body
     const validEmailBody = validateEmailBody(emailBodyText);
@@ -285,7 +286,7 @@ async function leadReplyDataMapper({
   try {
     // console.log(colorize("LEAD", "cyan"), lead);
     // console.log(colorize("EMAIL", "cyan"), email);
-    const emailBodyText = email?.body?.text || "";
+    const emailBodyText = email?.body?.text || email?.content_preview || "";
 
     // Step 1: Validate email body
     const validEmailBody = validateEmailBody(emailBodyText);
@@ -331,7 +332,8 @@ async function ReplyDataMapper({ email, setErrorOccurred, setErrorContext }) {
   try {
     // console.log(colorize("LEAD", "cyan"), lead);
     // console.log(colorize("EMAIL", "cyan"), email);
-    const emailBodyText = email?.body?.text || "";
+    const emailBodyText = email?.body?.text || email?.content_preview || "";
+    // const emailBodyText = email?.body?.text || "";
 
     // Step 1: Validate email body
     const validEmailBody = validateEmailBody(emailBodyText);

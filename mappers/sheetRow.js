@@ -180,7 +180,6 @@ function buildSheetRowEmailAndLead({
   firstName,
   lastName,
   phone1,
-  phone2,
   salesPerson,
   salesPersonEmail,
 }) {
@@ -188,6 +187,12 @@ function buildSheetRowEmailAndLead({
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const phoneFromEmail = extractPhoneFromText(extracted.reply);
   const emailSignature = extracted.signature || "";
+  console.log("lead")
+  console.log(lead)
+
+  const websiteFromDomain = `www.${lead?.payload?.domain}`;
+
+
 
   return {
     "Email Sender": `${salesPerson} : ${salesPersonEmail}`,
@@ -196,7 +201,7 @@ function buildSheetRowEmailAndLead({
     "Email Signature": extracted.signature || emailSignature || "none",
     Address: extracted.address || "none",
     "Phone Number:": phoneFromEmail || phone1 || "none",
-    "Website:": lead?.website || payload.website || "none",
+    "Website:": lead?.website || payload.website || websiteFromDomain|| "none",
   };
 }
 function buildSheetRowEmailOnly({

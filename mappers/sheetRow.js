@@ -128,7 +128,7 @@ function buildSheetRow({
   const emailSignature = extracted.signature || "";
 
   return {
-    "Column 1": env.AGENT_NAME || "instaSheet agent x1",
+    "Agent": env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "none",
     "sales person": salesPerson || "none",
     "sales person email": salesPersonEmail || "none",
@@ -138,7 +138,6 @@ function buildSheetRow({
     "lead first name": firstName || "none",
     "lead last name": lastName || "none",
     "lead email": leadEmail || "none",
-    "Column 2": leadEmail || "none",
     "email reply": extracted.reply || "",
     "phone 1": phone1 || "none",
     "#": phone1 || "none",

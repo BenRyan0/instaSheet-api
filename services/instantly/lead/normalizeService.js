@@ -8,6 +8,7 @@ async function normalizeRow(emailRow) {
   return {
     "Agent": env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "",
+    "Hot leads": "Hot lead",
     "sales person": emailRow["sales person"] || "none",
     "sales person email": emailRow["sales person email"] || "none",
     company: emailRow["company"] || "N/A",
@@ -21,6 +22,9 @@ async function normalizeRow(emailRow) {
     "lead last name": emailRow["lead last name"] || "none",
     "lead email": emailRow["lead email"] || "none",
     "email reply": emailRow["email reply"] || "",
+    "phone 1" : "",
+    "#" : "",
+    "phone2": "",
     address: emailRow.address || "none",
     city: emailRow.city || "none",
     state: emailRow.state || "none",

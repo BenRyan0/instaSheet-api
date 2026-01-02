@@ -122,6 +122,10 @@ function buildSheetRow({
   salesPerson,
   salesPersonEmail,
 }) {
+  console.log("lead -----------------------------------------------------------")
+  console.log(lead)
+  console.log("email ----------------------------------------------------------")
+  console.log(email)
   const payload = lead?.payload || {};
   const leadEmail = lead?.email || lead?.lead || email?.lead || "";
   const phoneFromEmail = extractPhoneFromText(extracted.reply);
@@ -130,6 +134,7 @@ function buildSheetRow({
   return {
     "Agent": env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "none",
+    "Hot leads": "Hot lead",
     "sales person": salesPerson || "none",
     "sales person email": salesPersonEmail || "none",
     company: lead?.company_name || lead?.company || "none",
@@ -139,8 +144,9 @@ function buildSheetRow({
     "lead last name": lastName || "none",
     "lead email": leadEmail || "none",
     "email reply": extracted.reply || "",
-    "phone 1": phone1 || "none",
-    "#": phone1 || "none",
+      "phone 1" : "",
+    "#" : "",
+    "phone2": "",
     address:
       payload.street ||
       payload.street1 ||

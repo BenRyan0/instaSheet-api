@@ -6,7 +6,7 @@ async function normalizeRow(emailRow) {
   console.log("EMAIL ROW")
   console.log(emailRow)
   return {
-    "Column 1": env.AGENT_NAME || "instaSheet agent x1",
+    "Agent": env.AGENT_NAME || "instaSheet agent x1",
     "For scheduling": "",
     "sales person": emailRow["sales person"] || "none",
     "sales person email": emailRow["sales person email"] || "none",
@@ -20,17 +20,12 @@ async function normalizeRow(emailRow) {
     "lead first name": emailRow["lead first name"] || "none",
     "lead last name": emailRow["lead last name"] || "none",
     "lead email": emailRow["lead email"] || "none",
-    "Column 2": emailRow["lead email"] || "none",
     "email reply": emailRow["email reply"] || "",
-    "phone 1": emailRow["phone 1"] || "none",
-    "#": emailRow["phone 1"] || "none",
-    phone2: emailRow.phone2 || "none",
     address: emailRow.address || "none",
     city: emailRow.city || "none",
     state: emailRow.state || "none",
     zip: !emailRow?.zip || emailRow.zip === "NULL" ? "none" : emailRow.zip,
     details: emailRow.details || "none",
-    // details: "none",
     "Email Signature": emailRow["Email Signature"] || "none",
     "linkedin link": "none",
     "status after the call": "none",

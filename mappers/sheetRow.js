@@ -141,7 +141,6 @@ function buildSheetRow({
     "email reply": extracted.reply || "",
     "phone 1": phone1 || "none",
     "#": phone1 || "none",
-    phone2: phone2 || "none",
     address:
       payload.street ||
       payload.street1 ||

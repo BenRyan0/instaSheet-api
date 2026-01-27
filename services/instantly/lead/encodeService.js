@@ -190,7 +190,7 @@ async function encodeToSheet(
   setErrorOccurred,
   setErrorContext,
   addTotalToBeApproved,
-  autoAppend
+  autoAppend,
 ) {
   const { sheets } = await initGoogleClients();
 console.log("sheetName")

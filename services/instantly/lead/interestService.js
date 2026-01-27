@@ -357,12 +357,14 @@ async function isAddressUsBased({
   zip = "",
   country = "",
   phone = "",
+  Signature = "",
   runContext,
   // setErrorOccurred,
   // setErrorContext,
 } = {}) {
   try {
-    const fields = { address, city, state, zip, country, phone };
+    const fields = { address, city, state, zip, country, phone , Signature };
+    console.log("Evaluating address fields:", fields);
     const allValues = Object.values(fields).filter(Boolean);
 
     console.log(
@@ -370,7 +372,7 @@ async function isAddressUsBased({
     );
 
     // Combine all parts for fallback testing (in case city/state swapped)
-    const combinedText = `${address} ${city} ${state} ${zip} ${country}`.trim();
+    const combinedText = `${address} ${city} ${state} ${zip} ${country} ${phone} ${Signature}`.trim();
 
     //  Helper to test a regex on all values or combined text
     const matchesAny = (regex) =>
@@ -531,120 +533,83 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
   }
 }
 
+
 async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
+  console.log("ADASDADSDASD_________")
   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
     console.warn("Skipping empty or invalid email reply");
     return false;
   }
 
   const text = normalize(emailReply);
-  const url = "https://openrouter.ai/api/v1/chat/completions";
-  const apiKeys = [
-    env.OPENROUTER_API_KEY,
-    env.OPENROUTER_API_KEY2,
-    env.OPENROUTER_API_KEY3,
-  ].filter(Boolean);
+  const apiKey = process.env.OPEN_API_KEY; // your OpenAI API key
 
-  const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
-
-  if (!apiKeys.length) {
+  if (!apiKey) {
     console.error(
-      "No OpenRouter API keys available → using rule-based fallback."
+      "No OpenAI API key available → using rule-based fallback."
     );
     return ruleBasedCheck(text);
   }
+
+  const model = "gpt-4.1"; // replace with your OpenAI model
 
   let attempt = 0;
   const maxAttempts = 3;
 
   while (attempt < maxAttempts) {
-    const keyIndex = attempt % apiKeys.length;
-    const currentKey = apiKeys[keyIndex];
-
-    console.log(
-      `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
-        keyIndex + 1
-      })`
-    );
+    console.log(`Attempt #${attempt + 1} using OpenAI model: ${model}`);
 
     try {
       const headers = {
-        Authorization: `Bearer ${currentKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       };
 
-      const resp = await fetchWithTimeout(
-        url,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: `
-                You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: `
+You are an intelligent assistant that analyzes email replies to a business funding message.
 
-                ---
+---
 
-                ### OFFER CONTEXT
-                We help businesses access **working capital or merchant cash advances (MCA)** based on their gross receipts — *not their credit score*.
-                - Fast approval and same-day funding (within 24 hours)
-                - Designed for small and medium-sized businesses needing quick, flexible financing
-                - Simple qualification process with minimal documentation
+### OFFER CONTEXT
+We help businesses access **working capital or merchant cash advances (MCA)** based on their gross receipts — *not their credit score*.
+- Fast approval and same-day funding (within 24 hours)
+- Designed for small and medium-sized businesses needing quick, flexible financing
+- Simple qualification process with minimal documentation
 
-                ---
+---
 
-                ### YOUR TASK
-                Read the email reply and decide what the sender is most likely interested in.  
-                Be flexible — many people express interest indirectly (for example, by asking questions, agreeing to talk, or showing curiosity).  
+### YOUR TASK
+You must analyze the email and provide TWO separate classifications:
 
-                Choose **only one** of the following:
+**CLASSIFICATION 1: Interest Type**
+Determine what the sender is interested in:
 
-                1. **"offer"** → The sender shows *any level of interest, curiosity, or willingness to engage* about our funding offer.  
-                  - They request or agree to a chat, call, or more information.  
-                  - They reply positively, even with short or indirect responses such as:  
-                    - “Yes”, “Sure”, “Okay”, “Sounds good”, “Chat please”, “Let’s talk”, “Can you tell me more?”, “Who are you working with?”, “What companies have you talked to?”, “Interested”, “Send details”, “Please do”.  
-                  - They ask follow-up or contextual questions that suggest they’re open to learning more (e.g., “Where are you located?”, “Who handles your clients?”, “What’s the rate?”).  
-                  - They forward or refer you to someone who manages financing.  
-                  - *If the tone is open, curious, or conversational — treat it as “offer.”*
+1. **"offer"** → The sender shows interest in our funding offer.
+2. **"sba"** → The sender specifically mentions or asks about SBA loans.
+3. **"partnership"** → The sender is interested in collaboration or referral opportunities.
+4. **"false"** → The sender is not interested.
 
-                2. **"sba"** → The sender specifically mentions or asks about *SBA loans* (Small Business Administration).  
-                  - Mentions “SBA”, “SBA loan”, “7(a)”, “504”, “government loan”, or “small business administration”.  
-                  - Asks if your company provides SBA loans or compares your offer to SBA funding.
+**CLASSIFICATION 2: Hot Lead Status**
+- **"hot"** → strong, actionable interest requiring immediate follow-up
+- **"normal"** → basic interest, not urgent
 
-                3. **"partnership"** → The sender is interested in *collaboration or referral opportunities*, not funding.  
-                  - Mentions teaming up, cross-promotions, joint ventures, or sharing leads.
-
-                4. **"false"** → The sender is *not interested* in funding, SBA loans, or partnership.  
-                  - They reject, unsubscribe, or say they’re not looking for funding.  
-                  - They request unrelated help (grants, jobs, donations, etc.).  
-                  - The message is automated, out-of-office, or irrelevant.
-
-                ---
-
-                ### TIE-BREAK RULE
-                If multiple intents appear, choose the one **most likely to lead to a continued conversation**:  
-                **offer > sba > partnership > false**
-
-                ---
-
-                ### RESPONSE FORMAT
-                Respond **only** with one of these exact lowercase words and nothing else:  
-                **offer**, **sba**, **partnership**, or **false**.
-                `,
-              },
-
-              { role: "user", content: text },
-            ],
-            temperature: 0,
-          }),
-        },
-        60000 // 60s timeout
-      );
-
-      console.log("Response status:", resp.status);
+Respond with EXACTLY two words separated by a comma: [interest_type],[hot_status]
+If not interested (false), the hot status should always be "normal".
+`,
+            },
+            { role: "user", content: text },
+          ],
+          temperature: 0,
+        }),
+      });
 
       if (!resp.ok) {
         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
@@ -656,54 +621,49 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
       const json = await resp.json();
       const modelOut =
         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
-        json.choices?.[0]?.text?.trim()?.toLowerCase() ||
         "";
 
-      const normalizedOut =
-        (modelOut.match(/\b(offer|partnership|sba|false)\b/i) ||
-          [])[1]?.toLowerCase() || "";
+      const parts = modelOut.split(",").map((p) => p.trim());
+      const interestType = parts[0];
+      const hotStatus = parts[1];
 
-      if (!normalizedOut) {
-        console.warn(`Unexpected LLM output: "${modelOut}"`);
+      if (!["offer", "sba", "partnership", "false"].includes(interestType)) {
+        console.warn(`Unexpected interest type: "${interestType}"`);
         attempt++;
         continue;
       }
 
-      if (normalizedOut === "sba") {
-        console.log("Classified as: SBA (interested in funding offer)");
-        if (typeof addTotalInterestedLLM === "function")
-          await addTotalInterestedLLM(1);
-        await incrementClassifiedInterestReplies("sba")
-        return { interested: true, type: "sba" };
+      if (!["hot", "normal"].includes(hotStatus)) {
+        console.warn(`Unexpected hot status: "${hotStatus}"`);
+        attempt++;
+        continue;
       }
 
-      if (normalizedOut === "offer") {
-        console.log("Classified as: OFFER (interested in funding offer)");
-        if (typeof addTotalInterestedLLM === "function")
-         await addTotalInterestedLLM(1);
-        await incrementClassifiedInterestReplies("offers")
-        return { interested: true, type: "offer" };
+      const isHot = hotStatus === "hot";
+      const isInterested = interestType !== "false";
+
+      if (isInterested && typeof addTotalInterestedLLM === "function") {
+        await addTotalInterestedLLM(1);
+        if (isHot) await incrementClassifiedInterestReplies("hot_leads");
+        await incrementClassifiedInterestReplies(
+          interestType === "offer" ? "offers" : interestType
+        );
       }
 
-      if (normalizedOut === "partnership") {
-        console.log("Classified as: PARTNERSHIP (interested in collaboration)");
-        if (typeof addTotalInterestedLLM === "function")
-         await addTotalInterestedLLM(1);
-        await incrementClassifiedInterestReplies("partnership")
-        return { interested: true, type: "partnership" };
-      }
+      console.log("AI Interest classification result:", {
+        interested: isInterested,
+        type: isInterested ? interestType : null,
+        isHot,
+      });
 
-      if (normalizedOut === "false") {
-        console.log("Classified as: FALSE (not interested)");
-        return { interested: false, type: null };
-      }
-
-      console.warn(`Unrecognized classification output: "${modelOut}"`);
-      return false;
+      return {
+        interested: isInterested,
+        type: isInterested ? interestType : null,
+        isHot,
+        priority: isHot ? "urgent" : "normal",
+      };
     } catch (err) {
-      console.error(
-        `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
-      );
+      console.error(`Attempt #${attempt + 1} failed (${err.name}: ${err.message})`);
       attempt++;
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
@@ -711,9 +671,404 @@ async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
 
   console.warn("All retries failed → using rule-based fallback check...");
   const ruleResult = ruleBasedCheck(text);
-  console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
   return ruleResult;
 }
+
+
+// async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
+//   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
+//     console.warn("Skipping empty or invalid email reply");
+//     return false;
+//   }
+
+//   const text = normalize(emailReply);
+//   const url = "https://openrouter.ai/api/v1/chat/completions";
+//   const apiKeys = [
+//     env.OPENROUTER_API_KEY,
+//     env.OPENROUTER_API_KEY2,
+//     env.OPENROUTER_API_KEY3,
+//   ].filter(Boolean);
+
+//   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
+
+//   if (!apiKeys.length) {
+//     console.error(
+//       "No OpenRouter API keys available → using rule-based fallback."
+//     );
+//     return ruleBasedCheck(text);
+//   }
+
+//   let attempt = 0;
+//   const maxAttempts = 3;
+
+//   while (attempt < maxAttempts) {
+//     const keyIndex = attempt % apiKeys.length;
+//     const currentKey = apiKeys[keyIndex];
+
+//     console.log(
+//       `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
+//         keyIndex + 1
+//       })`
+//     );
+
+//     try {
+//       const headers = {
+//         Authorization: `Bearer ${currentKey}`,
+//         "Content-Type": "application/json",
+//       };
+
+//       const resp = await fetchWithTimeout(
+//         url,
+//         {
+//           method: "POST",
+//           headers,
+//           body: JSON.stringify({
+//             model,
+//             messages: [
+//               {
+//                 role: "system",
+//                 content: `
+//                 You are an intelligent assistant that analyzes email replies to a business funding message.
+
+//                 ---
+
+//                 ### OFFER CONTEXT
+//                 We help businesses access **working capital or merchant cash advances (MCA)** based on their gross receipts — *not their credit score*.
+//                 - Fast approval and same-day funding (within 24 hours)
+//                 - Designed for small and medium-sized businesses needing quick, flexible financing
+//                 - Simple qualification process with minimal documentation
+
+//                 ---
+
+//                 ### YOUR TASK
+//                 You must analyze the email and provide TWO separate classifications:
+
+//                 **CLASSIFICATION 1: Interest Type**
+//                 Determine what the sender is interested in:
+
+//                 1. **"offer"** → The sender shows interest in our funding offer.  
+//                   - They request or agree to a chat, call, or more information.  
+//                   - They reply positively: "Yes", "Sure", "Okay", "Sounds good", "Chat please", "Let's talk", "Can you tell me more?", "Interested", "Send details".  
+//                   - They ask follow-up questions (e.g., "Where are you located?", "What's the rate?").  
+//                   - They forward or refer you to someone who manages financing.  
+
+//                 2. **"sba"** → The sender specifically mentions or asks about *SBA loans*.  
+//                   - Mentions "SBA", "SBA loan", "7(a)", "504", "government loan", or "small business administration".  
+
+//                 3. **"partnership"** → The sender is interested in *collaboration or referral opportunities*, not funding.  
+//                   - Mentions teaming up, cross-promotions, joint ventures, or sharing leads.
+
+//                 4. **"false"** → The sender is *not interested*.  
+//                   - They reject, unsubscribe, or say they're not looking for funding.  
+//                   - They request unrelated help (grants, jobs, donations, etc.).  
+//                   - The message is automated, out-of-office, or irrelevant.
+
+//                 **CLASSIFICATION 2: Hot Lead Status**
+//                 Separately determine if this is a HOT LEAD (needs immediate call):
+
+//                 - **"hot"** → The sender shows *strong, actionable interest* requiring IMMEDIATE follow-up:
+//                   - They provide their phone number and explicitly request a call (e.g., "Please call me tomorrow at 404-516-7697").  
+//                   - They express enthusiastic interest and proactively suggest scheduling (e.g., "Yes, definitely I'm interested. When can we schedule a phone call?").  
+//                   - They ask detailed qualifying questions (e.g., "What are your rates?", "How much can I qualify for?", "What documents do I need?").  
+//                   - They indicate urgency (e.g., "I need funding ASAP", "How quickly can we close?").  
+//                   - The tone is warm, engaged, going beyond just "yes" or "interested" — they're actively moving forward.
+
+//                 - **"normal"** → The sender shows interest but it's not urgent enough for immediate follow-up.
+//                   - Basic affirmative responses like "yes", "okay", "interested" without additional context.
+//                   - Passive interest without phone numbers, scheduling requests, or detailed questions.
+
+//                 ---
+
+//                 ### RESPONSE FORMAT
+//                 Respond with EXACTLY two words separated by a comma, nothing else:
+//                 **[interest_type],[hot_status]**
+
+//                 Examples:
+//                 - "offer,hot" (interested in funding + needs immediate call)
+//                 - "offer,normal" (interested in funding + standard follow-up)
+//                 - "sba,hot" (asking about SBA + very engaged)
+//                 - "partnership,normal" (wants to collaborate + standard priority)
+//                 - "false,normal" (not interested)
+
+//                 If not interested (false), the hot status should always be "normal".
+//                 `,
+//               },
+
+//               { role: "user", content: text },
+//             ],
+//             temperature: 0,
+//           }),
+//         },
+//         60000 // 60s timeout
+//       );
+
+//       console.log("Response status:", resp.status);
+
+//       if (!resp.ok) {
+//         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
+//         attempt++;
+//         await new Promise((r) => setTimeout(r, 2000 * attempt));
+//         continue;
+//       }
+
+//       const json = await resp.json();
+//       const modelOut =
+//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
+//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
+//         "";
+
+//       // Parse the two-part response: "type,hot_status"
+//       const parts = modelOut.split(",").map(p => p.trim());
+//       const interestType = parts[0];
+//       const hotStatus = parts[1];
+
+//       // Validate both parts
+//       if (!["offer", "sba", "partnership", "false"].includes(interestType)) {
+//         console.warn(`Unexpected interest type: "${interestType}"`);
+//         attempt++;
+//         continue;
+//       }
+
+//       if (!["hot", "normal"].includes(hotStatus)) {
+//         console.warn(`Unexpected hot status: "${hotStatus}"`);
+//         attempt++;
+//         continue;
+//       }
+
+//       const isHot = hotStatus === "hot";
+//       const isInterested = interestType !== "false";
+
+//       // Log the classification
+//       const hotLabel = isHot ? "HOT LEAD" : "standard";
+//       console.log(`Classified as: ${interestType.toUpperCase()} (${hotLabel})`);
+
+//       // Track interested leads
+//       if (isInterested) {
+//         if (typeof addTotalInterestedLLM === "function") {
+//           await addTotalInterestedLLM(1);
+//         }
+        
+//         // Increment specific counters
+//         if (isHot) {
+//           await incrementClassifiedInterestReplies("hot_leads");
+//         }
+//         await incrementClassifiedInterestReplies(interestType === "offer" ? "offers" : interestType);
+//       }
+
+//       // Return structured response
+//       if (interestType === "false") {
+//         return { interested: false, type: null, isHot: false };
+//       }
+
+//       console.log("IsHOT")
+//       console.log(isHot)
+//       return { 
+//         interested: true, 
+//         type: interestType,
+//         isHot: isHot,
+//         priority: isHot ? "urgent" : "normal"
+//       };
+
+//     } catch (err) {
+//       console.error(
+//         `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
+//       );
+//       attempt++;
+//       await new Promise((r) => setTimeout(r, 2000 * attempt));
+//     }
+//   }
+
+//   console.warn("All retries failed → using rule-based fallback check...");
+//   const ruleResult = ruleBasedCheck(text);
+//   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
+//   return ruleResult;
+// }
+
+
+
+// async function isActuallyInterested(emailReply, addTotalInterestedLLM) {
+//   if (!emailReply || typeof emailReply !== "string" || !emailReply.trim()) {
+//     console.warn("Skipping empty or invalid email reply");
+//     return false;
+//   }
+
+//   const text = normalize(emailReply);
+//   const url = "https://openrouter.ai/api/v1/chat/completions";
+//   const apiKeys = [
+//     env.OPENROUTER_API_KEY,
+//     env.OPENROUTER_API_KEY2,
+//     env.OPENROUTER_API_KEY3,
+//   ].filter(Boolean);
+
+//   const model = env.OPEN_ROUTER_MODEL2 || "openai/gpt-5-chat";
+
+//   if (!apiKeys.length) {
+//     console.error(
+//       "No OpenRouter API keys available → using rule-based fallback."
+//     );
+//     return ruleBasedCheck(text);
+//   }
+
+//   let attempt = 0;
+//   const maxAttempts = 3;
+
+//   while (attempt < maxAttempts) {
+//     const keyIndex = attempt % apiKeys.length;
+//     const currentKey = apiKeys[keyIndex];
+
+//     console.log(
+//       `Attempt #${attempt + 1} using OpenRouter model: ${model} (API Key #${
+//         keyIndex + 1
+//       })`
+//     );
+
+//     try {
+//       const headers = {
+//         Authorization: `Bearer ${currentKey}`,
+//         "Content-Type": "application/json",
+//       };
+
+//       const resp = await fetchWithTimeout(
+//         url,
+//         {
+//           method: "POST",
+//           headers,
+//           body: JSON.stringify({
+//             model,
+//             messages: [
+//               {
+//                 role: "system",
+//                 content: `
+//                 You are an intelligent assistant that determines the *intent* of an email reply to a business funding message.
+
+//                 ---
+
+//                 ### OFFER CONTEXT
+//                 We help businesses access **working capital or merchant cash advances (MCA)** based on their gross receipts — *not their credit score*.
+//                 - Fast approval and same-day funding (within 24 hours)
+//                 - Designed for small and medium-sized businesses needing quick, flexible financing
+//                 - Simple qualification process with minimal documentation
+
+//                 ---
+
+//                 ### YOUR TASK
+//                 Read the email reply and decide what the sender is most likely interested in.  
+//                 Be flexible — many people express interest indirectly (for example, by asking questions, agreeing to talk, or showing curiosity).  
+
+//                 Choose **only one** of the following:
+
+//                 1. **"offer"** → The sender shows *any level of interest, curiosity, or willingness to engage* about our funding offer.  
+//                   - They request or agree to a chat, call, or more information.  
+//                   - They reply positively, even with short or indirect responses such as:  
+//                     - “Yes”, “Sure”, “Okay”, “Sounds good”, “Chat please”, “Let’s talk”, “Can you tell me more?”, “Who are you working with?”, “What companies have you talked to?”, “Interested”, “Send details”, “Please do”.  
+//                   - They ask follow-up or contextual questions that suggest they’re open to learning more (e.g., “Where are you located?”, “Who handles your clients?”, “What’s the rate?”).  
+//                   - They forward or refer you to someone who manages financing.  
+//                   - *If the tone is open, curious, or conversational — treat it as “offer.”*
+
+//                 2. **"sba"** → The sender specifically mentions or asks about *SBA loans* (Small Business Administration).  
+//                   - Mentions “SBA”, “SBA loan”, “7(a)”, “504”, “government loan”, or “small business administration”.  
+//                   - Asks if your company provides SBA loans or compares your offer to SBA funding.
+
+//                 3. **"partnership"** → The sender is interested in *collaboration or referral opportunities*, not funding.  
+//                   - Mentions teaming up, cross-promotions, joint ventures, or sharing leads.
+
+//                 4. **"false"** → The sender is *not interested* in funding, SBA loans, or partnership.  
+//                   - They reject, unsubscribe, or say they’re not looking for funding.  
+//                   - They request unrelated help (grants, jobs, donations, etc.).  
+//                   - The message is automated, out-of-office, or irrelevant.
+
+//                 ---
+
+//                 ### TIE-BREAK RULE
+//                 If multiple intents appear, choose the one **most likely to lead to a continued conversation**:  
+//                 **offer > sba > partnership > false**
+
+//                 ---
+
+//                 ### RESPONSE FORMAT
+//                 Respond **only** with one of these exact lowercase words and nothing else:  
+//                 **offer**, **sba**, **partnership**, or **false**.
+//                 `,
+//               },
+
+//               { role: "user", content: text },
+//             ],
+//             temperature: 0,
+//           }),
+//         },
+//         60000 // 60s timeout
+//       );
+
+//       console.log("Response status:", resp.status);
+
+//       if (!resp.ok) {
+//         console.warn(`HTTP error ${resp.status} on attempt #${attempt + 1}`);
+//         attempt++;
+//         await new Promise((r) => setTimeout(r, 2000 * attempt));
+//         continue;
+//       }
+
+//       const json = await resp.json();
+//       const modelOut =
+//         json.choices?.[0]?.message?.content?.trim()?.toLowerCase() ||
+//         json.choices?.[0]?.text?.trim()?.toLowerCase() ||
+//         "";
+
+//       const normalizedOut =
+//         (modelOut.match(/\b(offer|partnership|sba|false)\b/i) ||
+//           [])[1]?.toLowerCase() || "";
+
+//       if (!normalizedOut) {
+//         console.warn(`Unexpected LLM output: "${modelOut}"`);
+//         attempt++;
+//         continue;
+//       }
+
+//       if (normalizedOut === "sba") {
+//         console.log("Classified as: SBA (interested in funding offer)");
+//         if (typeof addTotalInterestedLLM === "function")
+//           await addTotalInterestedLLM(1);
+//         await incrementClassifiedInterestReplies("sba")
+//         return { interested: true, type: "sba" };
+//       }
+
+//       if (normalizedOut === "offer") {
+//         console.log("Classified as: OFFER (interested in funding offer)");
+//         if (typeof addTotalInterestedLLM === "function")
+//          await addTotalInterestedLLM(1);
+//         await incrementClassifiedInterestReplies("offers")
+//         return { interested: true, type: "offer" };
+//       }
+
+//       if (normalizedOut === "partnership") {
+//         console.log("Classified as: PARTNERSHIP (interested in collaboration)");
+//         if (typeof addTotalInterestedLLM === "function")
+//          await addTotalInterestedLLM(1);
+//         await incrementClassifiedInterestReplies("partnership")
+//         return { interested: true, type: "partnership" };
+//       }
+
+//       if (normalizedOut === "false") {
+//         console.log("Classified as: FALSE (not interested)");
+//         return { interested: false, type: null };
+//       }
+
+//       console.warn(`Unrecognized classification output: "${modelOut}"`);
+//       return false;
+//     } catch (err) {
+//       console.error(
+//         `Attempt #${attempt + 1} failed (${err.name}: ${err.message})`
+//       );
+//       attempt++;
+//       await new Promise((r) => setTimeout(r, 2000 * attempt));
+//     }
+//   }
+
+//   console.warn("All retries failed → using rule-based fallback check...");
+//   const ruleResult = ruleBasedCheck(text);
+//   console.log(`Rule-based fallback result: ${ruleResult ? "TRUE" : "FALSE"}`);
+//   return ruleResult;
+// }
 
 // --- n8n Fallback Helper ---
 async function sendToN8nWebhook(emailReply) {

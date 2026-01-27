@@ -36,11 +36,13 @@ class webhookController {
     sheetName,
     sheetNameForPartnership,
     sheetNameForSBA,
+    sheetNameForHotLead,
     autoAppend,
     descriptionExtraction,
     clientId
   }) {
 
+    console.log(`sheetNameForHotLead : ${sheetNameForHotLead}`)
     console.log(`sheetNameForPartnership : ${sheetNameForPartnership}`)
     console.log(`sheetNameForSBA : ${sheetNameForSBA}`)
     console.log(`sheetName : ${sheetName}`)
@@ -97,6 +99,7 @@ class webhookController {
           sheetName,
           sheetNameForPartnership,
           sheetNameForSBA,
+          sheetNameForHotLead
         ];
 
         const { newLeads, error } = await filterNewLeads(

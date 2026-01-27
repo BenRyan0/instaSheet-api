@@ -67,6 +67,8 @@ class instantlyAiController {
         sheetNameForSBA,
         clientId,
       } = req.body;
+
+      const sheetNameForHotLead = "Hot Leads";
       console.log(req.body);
 
       if (!opts || !sheetName || !sheetNameForPartnership || !sheetNameForSBA) {
@@ -144,6 +146,7 @@ class instantlyAiController {
           sheetName,
           sheetNameForPartnership,
           sheetNameForSBA,
+          sheetNameForHotLead,
         ];
 
         const { newLeads, error } = await filterNewLeads(

@@ -137,8 +137,9 @@ const init = (server, options = {}) => {
             opts,
             sheetName: payload.sheetName || "MCA Loan",
             sheetNameForPartnership:
-              payload.sheetNameForPartnership || "Partner MCA",
+            payload.sheetNameForPartnership || "Partner MCA",
             sheetNameForSBA: payload.sheetNameForSBA || "SBA-MCA",
+            sheetNameForHotLead: payload.sheetNameForHotLead || "Hot Leads",
             autoAppend: true,
             descriptionExtraction: true,
             clientId,

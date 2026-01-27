@@ -42,7 +42,7 @@ REDIS_PASSWORD : z.string(),
   OPEN_ROUTER_MODEL2: z.string(),
   OPEN_ROUTER_LOCATION_MODEL: z.string(),
   LOCAL_LLM: z.string(),
-  USE_LOCAL: z.coerce.boolean(),
+USE_LOCAL: z.string().transform(val => val === 'true').pipe(z.boolean()),
 
   AGENT_NAME: z.string(),
   CLIENT: z.string(),
@@ -59,6 +59,7 @@ REDIS_PASSWORD : z.string(),
   OPENROUTER_API_SEC_KEY: z.string(),
 
   PERFEX_CRM_API_KEY: z.string(),
+POST_TO_CRM_MODE: z.string().transform(val => val === 'true').pipe(z.boolean()), // FIXED
 });
 
 let env;

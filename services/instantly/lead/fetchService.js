@@ -92,61 +92,72 @@ async function fetchLeadsPage({
   const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
 
   try {
-    // Step 1: Get stored cursor (if any)
-    let storedCursor = await redisClient.get(redisCursorKey);
+    const storedCursor = await redisClient.get(redisCursorKey);
     const effectiveCursor = storedCursor || cursor || "";
 
     console.log(
       colorize("[ leads GET ]", "green"),
       "cursor ( limit =",
-      colorize(`${pageLimit}`, "green"),") => ",
+      colorize(`${pageLimit}`, "green"), ") =>",
       colorize(`${effectiveCursor}`, "green")
     );
 
-    // Step 2: Build request
     const body = {
-      filter: "FILTER_LEAD_INTERESTED",
+      filter: "FILTER_VAL_REPLIED",
       limit: pageLimit,
       starting_after: effectiveCursor,
+      queries: [
+        {
+          actionType: "reply",
+          values: { "occurrence-days": 30 },
+        },
+        {
+          actionType: "lead-status-change",
+          values: { "occurrence-days": 30 },
+        },
+      ],
     };
 
-    // Step 3: Send API request
     const response = await axios.post(
-      `https://api.instantly.ai/api/v2/leads/list`,
+      "https://api.instantly.ai/api/v2/leads/list",
       body,
-      {
-        headers: authHeaders,
-      }
+      { headers: authHeaders }
     );
 
+    console.log("API response data:", response.data);
+    console.log(response)
+
     const leads = response.data?.items || [];
-    leads.forEach((lead, index) => {
-      console.log(
-        `${index + 1}. `,
-        colorize(`${lead.email}`, "cyan"));
+
+    // 🔹 KEEP ONLY interest status 1 or 53
+    const filteredLeads = leads.filter(
+      lead => lead.lt_interest_status === 1 || lead.lt_interest_status === 53
+    );
+
+    filteredLeads.forEach((lead, index) => {
+      console.log(`${index + 1}.`, colorize(lead.email, "cyan"));
     });
 
-    // Step 4: Handle cursor logic
+    // Cursor logic stays EXACTLY the same
     if (response.data?.next_starting_after) {
       const newCursor = response.data.next_starting_after;
 
       await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
       await redisClient.del(redisFailCountKey);
 
-      // console.log(`Updated global Redis cursor: ${newCursor}`);
       console.log(
-      colorize("[ DONE ]", "green"),
-      "new cursor ( limit =",
-      colorize(`${pageLimit}`, "green"),") => ",
-      colorize(`${newCursor}`, "green")
-    );
+        colorize("[ DONE ]", "green"),
+        "new cursor ( limit =",
+        colorize(`${pageLimit}`, "green"), ") =>",
+        colorize(`${newCursor}`, "green")
+      );
     } else {
       console.log("No new cursor returned by API — keeping current cursor.");
 
       const failCount =
         (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
-      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
 
+      await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
       console.log(`No-cursor streak: ${failCount} time(s)`);
 
       if (failCount >= 3) {
@@ -156,14 +167,123 @@ async function fetchLeadsPage({
       }
     }
 
-    return response.data;
+    // 🔹 CRITICAL CHANGE:
+    // Replace items with filteredLeads before returning
+    return {
+      ...response.data,
+      items: filteredLeads
+    };
+
   } catch (error) {
     if (setErrorOccurred) setErrorOccurred(true);
-    if (setErrorContext) setErrorContext(`fetchLeadsPage: ${error.message}`);
+    if (setErrorContext) {
+      setErrorContext(`fetchLeadsPage: ${error.message}`);
+    }
+
     console.log("Error in fetchAllInterestedLeadsPage:", error.message);
     throw error;
   }
 }
+
+
+
+// async function fetchLeadsPage({
+//   cursor = null,
+//   pageLimit,
+//   authHeaders,
+//   setErrorContext,
+//   setErrorOccurred,
+// }) {
+//   const redisCursorKey = `insta:global_cursor:${pageLimit}`;
+//   const redisFailCountKey = `insta:global_cursor_failcount:${pageLimit}`;
+
+//   try {
+//     // Step 1: Get stored cursor (if any)
+//     let storedCursor = await redisClient.get(redisCursorKey);
+//     const effectiveCursor = storedCursor || cursor || "";
+
+//     console.log(
+//       colorize("[ leads GET ]", "green"),
+//       "cursor ( limit =",
+//       colorize(`${pageLimit}`, "green"),") => ",
+//       colorize(`${effectiveCursor}`, "green")
+//     );
+
+//     // Step 2: Build request
+//     const body = {
+//       filter: "FILTER_LEAD_INTERESTED",
+//       limit: pageLimit,
+//       starting_after: effectiveCursor,
+//        queries: [
+//     {
+//       actionType: "reply",
+//       values: {
+//         "occurrence-days": 30
+//       }
+//     },
+//     {
+//       actionType: "lead-status-change",
+//       values: {
+//         "occurrence-days": 30
+//       }
+//     }
+//   ]
+//     };
+
+//     // Step 3: Send API request
+//     const response = await axios.post(
+//       `https://api.instantly.ai/api/v2/leads/list`,
+//       body,
+//       {
+//         headers: authHeaders,
+//       }
+//     );
+
+//     const leads = response.data?.items || [];
+//     leads.forEach((lead, index) => {
+//       console.log(
+//         `${index + 1}. `,
+//         colorize(`${lead.email}`, "cyan"));
+//     });
+
+//     // Step 4: Handle cursor logic
+//     if (response.data?.next_starting_after) {
+//       const newCursor = response.data.next_starting_after;
+
+//       await redisClient.set(redisCursorKey, newCursor, { EX: 1800 });
+//       await redisClient.del(redisFailCountKey);
+
+//       // console.log(`Updated global Redis cursor: ${newCursor}`);
+//       console.log(
+//       colorize("[ DONE ]", "green"),
+//       "new cursor ( limit =",
+//       colorize(`${pageLimit}`, "green"),") => ",
+//       colorize(`${newCursor}`, "green")
+//     );
+//     } else {
+//       console.log("No new cursor returned by API — keeping current cursor.");
+
+//       const failCount =
+//         (parseInt(await redisClient.get(redisFailCountKey)) || 0) + 1;
+//       await redisClient.set(redisFailCountKey, failCount, { EX: 7200 });
+
+//       console.log(`No-cursor streak: ${failCount} time(s)`);
+
+//       if (failCount >= 3) {
+//         console.warn("No new cursor after 3 attempts — resetting cursor.");
+//         await redisClient.del(redisCursorKey);
+//         await redisClient.del(redisFailCountKey);
+//       }
+//     }
+
+//     return response.data;
+//   } catch (error) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(`fetchLeadsPage: ${error.message}`);
+//     console.log("Error in fetchAllInterestedLeadsPage:", error.message);
+//     throw error;
+//   }
+// }
 
 function getNextCursor(apiResponse) {
   if (!Array.isArray(apiResponse) || apiResponse.length === 0) {

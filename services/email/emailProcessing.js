@@ -18,6 +18,432 @@ const { extractBusinessDescription } = require("../emailParserService");
 const { mapToSheetRow } = require("../../mappers/sheetRow");
 const { emitProgress } = require("../../events/progressEmitter");
 
+// async function processEmailRow({
+//   emailRow,
+//   sheetName,
+//   sheetNameForPartnership,
+//   sheetNameForSBA,
+//   additionalContext,
+//   setErrorOccurred,
+//   setErrorContext,
+//   addToTotalEncoded,
+//   addTotalToBeApproved,
+//   addTotalInterestedLLM,
+//   autoAppend,
+//   descriptionExtraction,
+//   clientId,
+//   runCtx,
+// }) {
+//   console.log(colorize("Processing lead Email ...", "blue"));
+//   const spreadsheetId = env.SPREADSHEET_ID;
+
+//   try {
+//     const rowJson = await normalizeRow(emailRow);
+
+//     // ---------- Step 1: Address Present ----------
+//     const hasAddressInfo =
+//       rowJson.address !== "none" ||
+//       rowJson.city !== "none" ||
+//       rowJson.state !== "none" ||
+//       rowJson.zip !== "none" ||
+//       rowJson["company phone#"] !== "none";
+
+//     if (hasAddressInfo) {
+//       const usAddress = await isAddressUsBased({
+//         city: rowJson.city,
+//         state: rowJson.state,
+//         address: rowJson.address,
+//         zip: rowJson.zip,
+//         phone: rowJson["company phone#"],
+//         setErrorOccurred,
+//         setErrorContext,
+//       });
+
+//       if (!usAddress) return true;
+
+//       const { interested, type, isHot } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM,
+//         false
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+
+//         // const sheetNameForPartnership = "Partner MCA";
+
+//         const sheetNameMap = {
+//           partnership: sheetNameForPartnership,
+//           sba: sheetNameForSBA,
+//           offer: sheetNameForOffer,
+//         };
+
+//         const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+
+//         console.log("-------- rowJson.details --------");
+//         console.log(rowJson.details);
+//         // Replace details (website) with business description if available
+//         if (rowJson.details && rowJson.details !== "none") {
+//           // Check if details looks like a valid URL
+//           const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
+//             rowJson.details.trim()
+//           );
+
+//           if (isValidUrl) {
+//             try {
+//               const descResult = await extractBusinessDescription({
+//                 websiteUrl: rowJson.details,
+//                 setErrorOccurred,
+//                 setErrorContext,
+//                 descriptionExtraction,
+//               });
+
+//               if (
+//                 descResult &&
+//                 typeof descResult === "string" &&
+//                 descResult.trim()
+//               ) {
+//                 rowJson.details = descResult;
+//               } else {
+//                 rowJson.details = "none";
+//               }
+//             } catch (err) {
+//               console.warn(
+//                 "Failed to extract business description:",
+//                 err.message
+//               );
+//               if (setErrorContext) {
+//                 setErrorContext(
+//                   `Description extraction failed for ${rowJson.details}: ${err.message}`
+//                 );
+//               }
+//               rowJson.details = "none";
+//             }
+//           } else {
+//             // Skip extraction if details isn't a URL
+//             console.log(
+//               `Skipping description extraction — not a valid URL: ${rowJson.details}`
+//             );
+//           }
+//         }
+
+//         await encodeToSheet(
+//           spreadsheetId,
+//           (sheetName = sheetNameToUse),
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+
+//     // ---------- Step 2: Website Present ----------
+//     if (rowJson.details && rowJson.details !== "none") {
+//       if (additionalContext.Website && additionalContext.Website !== "none") {
+//         const usWebsite = await identifyBusinessCountry(
+//           additionalContext.Website
+//         );
+//         if (!usWebsite) return true;
+//       }
+
+//       const { interested, type } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM,
+//         false
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+//         // const sheetNameForPartnership = "Partner MCA";
+
+//         const sheetNameMap = {
+//           partnership: sheetNameForPartnership,
+//           sba: sheetNameForSBA,
+//           offer: sheetNameForOffer,
+//         };
+
+//         const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+
+//         try {
+//           const descResult = await extractBusinessDescription({
+//             websiteUrl: rowJson.details,
+//             setErrorOccurred,
+//             setErrorContext,
+//             descriptionExtraction,
+//           });
+
+//           if (
+//             descResult &&
+//             typeof descResult === "string" &&
+//             descResult.trim()
+//           ) {
+//             rowJson.details = descResult;
+//           } else {
+//             rowJson.details = "none";
+//           }
+//         } catch (err) {
+//           console.warn("Failed to extract business description:", err.message);
+//           rowJson.details = "none";
+//         }
+
+//         await encodeToSheet(
+//           spreadsheetId,
+//           (sheetName = sheetNameToUse),
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+
+//     // ---------- Step 3: No Address or Website ----------
+//     return true;
+//   } catch (err) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     console.error("processEmailRow failed:", err);
+//     return true;
+//   }
+// }
+// async function processEmailRow({
+//   emailRow,
+//   sheetName,
+//   sheetNameForPartnership,
+//   sheetNameForSBA,
+//   additionalContext,
+//   setErrorOccurred,
+//   setErrorContext,
+//   addToTotalEncoded,
+//   addTotalToBeApproved,
+//   addTotalInterestedLLM,
+//   autoAppend,
+//   descriptionExtraction,
+//   clientId,
+//   runCtx,
+// }) {
+//   console.log(colorize("Processing lead Email ...", "blue"));
+//   const spreadsheetId = env.SPREADSHEET_ID;
+
+//   try {
+//     const rowJson = await normalizeRow(emailRow);
+
+//     // ---------- Step 1: Address Present ----------
+//     const hasAddressInfo =
+//       rowJson.address !== "none" ||
+//       rowJson.city !== "none" ||
+//       rowJson.state !== "none" ||
+//       rowJson.zip !== "none" ||
+//       rowJson["company phone#"] !== "none";
+
+//     if (hasAddressInfo) {
+//       const usAddress = await isAddressUsBased({
+//         city: rowJson.city,
+//         state: rowJson.state,
+//         address: rowJson.address,
+//         zip: rowJson.zip,
+//         phone: rowJson["company phone#"],
+//         setErrorOccurred,
+//         setErrorContext,
+//       });
+
+//       if (!usAddress) return true;
+
+//       const { interested, type, isHot } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+
+//         // Update hot lead status dynamically
+//         if (isHot) {
+//           rowJson["Hot leads"] = "Hot lead";
+//           console.log("HOT LEAD DETECTED - Immediate follow-up required!");
+//         } else {
+//           rowJson["Hot leads"] = "";
+//           rowJson["For scheduling"] = "";
+//         }
+
+//         const sheetNameMap = {
+//           partnership: sheetNameForPartnership,
+//           sba: sheetNameForSBA,
+//           offer: sheetNameForOffer,
+//           hotLeads: "Hot Leads"
+//         };
+
+//         const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+
+//         console.log("-------- rowJson.details --------");
+//         console.log(rowJson.details);
+//         // Replace details (website) with business description if available
+//         if (rowJson.details && rowJson.details !== "none") {
+//           // Check if details looks like a valid URL
+//           const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
+//             rowJson.details.trim()
+//           );
+
+//           if (isValidUrl) {
+//             try {
+//               const descResult = await extractBusinessDescription({
+//                 websiteUrl: rowJson.details,
+//                 setErrorOccurred,
+//                 setErrorContext,
+//                 descriptionExtraction,
+//               });
+
+//               if (
+//                 descResult &&
+//                 typeof descResult === "string" &&
+//                 descResult.trim()
+//               ) {
+//                 rowJson.details = descResult;
+//               } else {
+//                 rowJson.details = "none";
+//               }
+//             } catch (err) {
+//               console.warn(
+//                 "Failed to extract business description:",
+//                 err.message
+//               );
+//               if (setErrorContext) {
+//                 setErrorContext(
+//                   `Description extraction failed for ${rowJson.details}: ${err.message}`
+//                 );
+//               }
+//               rowJson.details = "none";
+//             }
+//           } else {
+//             // Skip extraction if details isn't a URL
+//             console.log(
+//               `Skipping description extraction — not a valid URL: ${rowJson.details}`
+//             );
+//           }
+//         }
+
+//         await encodeToSheet(
+//           isHot,
+//           spreadsheetId,
+//           sheetNameToUse,
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+
+//     // ---------- Step 2: Website Present ----------
+//     if (rowJson.details && rowJson.details !== "none") {
+//       if (additionalContext.Website && additionalContext.Website !== "none") {
+//         const usWebsite = await identifyBusinessCountry(
+//           additionalContext.Website
+//         );
+//         if (!usWebsite) return true;
+//       }
+
+//       const { interested, type, isHot } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+
+//         // Update hot lead status dynamically
+//         if (isHot) {
+//           rowJson["Hot leads"] = "Hot lead";
+//           console.log("HOT LEAD DETECTED - Immediate follow-up required!");
+//         } else {
+//           rowJson["Hot leads"] = "";
+//           rowJson["For scheduling"] = "";
+//         }
+
+//         const sheetNameMap = {
+//           partnership: sheetNameForPartnership,
+//           sba: sheetNameForSBA,
+//           offer: sheetNameForOffer,
+//         };
+
+//         const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+
+//         try {
+//           const descResult = await extractBusinessDescription({
+//             websiteUrl: rowJson.details,
+//             setErrorOccurred,
+//             setErrorContext,
+//             descriptionExtraction,
+//           });
+
+//           if (
+//             descResult &&
+//             typeof descResult === "string" &&
+//             descResult.trim()
+//           ) {
+//             rowJson.details = descResult;
+//           } else {
+//             rowJson.details = "none";
+//           }
+//         } catch (err) {
+//           console.warn("Failed to extract business description:", err.message);
+//           rowJson.details = "none";
+//         }
+
+//         await encodeToSheet(
+//           spreadsheetId,
+//           sheetNameToUse,
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+
+//     // ---------- Step 3: No Address or Website ----------
+//     return true;
+//   } catch (err) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     console.error("processEmailRow failed:", err);
+//     return true;
+//   }
+// }
+
 async function processEmailRow({
   emailRow,
   sheetName,
@@ -40,141 +466,62 @@ async function processEmailRow({
   try {
     const rowJson = await normalizeRow(emailRow);
 
-    // ---------- Step 1: Address Present ----------
-    const hasAddressInfo =
-      rowJson.address !== "none" ||
-      rowJson.city !== "none" ||
-      rowJson.state !== "none" ||
-      rowJson.zip !== "none" ||
-      rowJson["company phone#"] !== "none";
+    // Check if lead is US-based (if address info exists)
+    await isAddressUsBased({
+      city: rowJson.city,
+      state: rowJson.state,
+      address: rowJson.address,
+      zip: rowJson.zip,
+      phone: rowJson["company phone#"],
+      Signature: rowJson["Email Signature"],
+      setErrorOccurred,
+      setErrorContext,
+    });
 
-    if (hasAddressInfo) {
-      const usAddress = await isAddressUsBased({
-        city: rowJson.city,
-        state: rowJson.state,
-        address: rowJson.address,
-        zip: rowJson.zip,
-        phone: rowJson["company phone#"],
-        setErrorOccurred,
-        setErrorContext,
-      });
+    // Check interest level
+    const { interested, type, isHot } = await isActuallyInterested(
+      rowJson["email reply"],
+      addTotalInterestedLLM
+    );
 
-      if (!usAddress) return true;
+    if (!interested) return true; // Skip if not interested
 
-      const { interested, type } = await isActuallyInterested(
-        rowJson["email reply"],
-        addTotalInterestedLLM,
-        false
-      );
+    emitProgress({ clientId, ctx: runCtx, show: false });
+    const sheetNameForOffer = sheetName;
+    await incrementFetchedInterestedLead();
 
-      if (interested) {
-        emitProgress({ clientId, ctx: runCtx, show: false });
-        const sheetNameForOffer = sheetName;
-        await incrementFetchedInterestedLead();
-
-        // const sheetNameForPartnership = "Partner MCA";
-
-        const sheetNameMap = {
-          partnership: sheetNameForPartnership,
-          sba: sheetNameForSBA,
-          offer: sheetNameForOffer,
-        };
-
-        const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
-
-        console.log("-------- rowJson.details --------");
-        console.log(rowJson.details);
-        // Replace details (website) with business description if available
-        if (rowJson.details && rowJson.details !== "none") {
-          // Check if details looks like a valid URL
-          const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
-            rowJson.details.trim()
-          );
-
-          if (isValidUrl) {
-            try {
-              const descResult = await extractBusinessDescription({
-                websiteUrl: rowJson.details,
-                setErrorOccurred,
-                setErrorContext,
-                descriptionExtraction,
-              });
-
-              if (
-                descResult &&
-                typeof descResult === "string" &&
-                descResult.trim()
-              ) {
-                rowJson.details = descResult;
-              } else {
-                rowJson.details = "none";
-              }
-            } catch (err) {
-              console.warn(
-                "Failed to extract business description:",
-                err.message
-              );
-              if (setErrorContext) {
-                setErrorContext(
-                  `Description extraction failed for ${rowJson.details}: ${err.message}`
-                );
-              }
-              rowJson.details = "none";
-            }
-          } else {
-            // Skip extraction if details isn't a URL
-            console.log(
-              `Skipping description extraction — not a valid URL: ${rowJson.details}`
-            );
-          }
-        }
-
-        await encodeToSheet(
-          spreadsheetId,
-          (sheetName = sheetNameToUse),
-          rowJson,
-          additionalContext,
-          addToTotalEncoded,
-          setErrorOccurred,
-          setErrorContext,
-          addTotalToBeApproved,
-          autoAppend,
-          type
-        );
-      }
-
-      return true;
+    // Update hot lead status dynamically
+    if (isHot) {
+      rowJson["Hot leads"] = "Hot lead";
+      console.log("HOT LEAD DETECTED - Immediate follow-up required!");
+    } else {
+      rowJson["Hot leads"] = "";
+      rowJson["For scheduling"] = "";
     }
 
-    // ---------- Step 2: Website Present ----------
-    if (rowJson.details && rowJson.details !== "none") {
-      if (additionalContext.Website && additionalContext.Website !== "none") {
-        const usWebsite = await identifyBusinessCountry(
-          additionalContext.Website
-        );
-        if (!usWebsite) return true;
-      }
+    // Determine sheet name - hot leads go to dedicated sheet
+    let sheetNameToUse;
+    if (isHot) {
+      sheetNameToUse = "Hot Leads";  // 👈 Dedicated hot leads sheet
+    } else {
+      const sheetNameMap = {
+        partnership: sheetNameForPartnership,
+        sba: sheetNameForSBA,
+        offer: sheetNameForOffer,
+      };
+      sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+    }
 
-      const { interested, type } = await isActuallyInterested(
-        rowJson["email reply"],
-        addTotalInterestedLLM,
-        false
+    console.log("-------- rowJson.details --------");
+    console.log(rowJson.details);
+    // Replace details (website) with business description if available
+    if (rowJson.details && rowJson.details !== "none") {
+      // Check if details looks like a valid URL
+      const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
+        rowJson.details.trim()
       );
 
-      if (interested) {
-        emitProgress({ clientId, ctx: runCtx, show: false });
-        const sheetNameForOffer = sheetName;
-        await incrementFetchedInterestedLead();
-        // const sheetNameForPartnership = "Partner MCA";
-
-        const sheetNameMap = {
-          partnership: sheetNameForPartnership,
-          sba: sheetNameForSBA,
-          offer: sheetNameForOffer,
-        };
-
-        const sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
-
+      if (isValidUrl) {
         try {
           const descResult = await extractBusinessDescription({
             websiteUrl: rowJson.details,
@@ -193,29 +540,39 @@ async function processEmailRow({
             rowJson.details = "none";
           }
         } catch (err) {
-          console.warn("Failed to extract business description:", err.message);
+          console.warn(
+            "Failed to extract business description:",
+            err.message
+          );
+          if (setErrorContext) {
+            setErrorContext(
+              `Description extraction failed for ${rowJson.details}: ${err.message}`
+            );
+          }
           rowJson.details = "none";
         }
-
-        await encodeToSheet(
-          spreadsheetId,
-          (sheetName = sheetNameToUse),
-          rowJson,
-          additionalContext,
-          addToTotalEncoded,
-          setErrorOccurred,
-          setErrorContext,
-          addTotalToBeApproved,
-          autoAppend,
-          type
+      } else {
+        // Skip extraction if details isn't a URL
+        console.log(
+          `Skipping description extraction — not a valid URL: ${rowJson.details}`
         );
       }
-
-      return true;
     }
 
-    // ---------- Step 3: No Address or Website ----------
-    return true;
+    await encodeToSheet(
+      spreadsheetId,
+      sheetNameToUse,
+      rowJson,
+      additionalContext,
+      addToTotalEncoded,
+      setErrorOccurred,
+      setErrorContext,
+      addTotalToBeApproved,
+      autoAppend,
+      type
+    );
+
+    return true; // Successfully processed
   } catch (err) {
     if (setErrorOccurred) setErrorOccurred(true);
     if (setErrorContext) setErrorContext(err.message);
@@ -223,6 +580,235 @@ async function processEmailRow({
     return true;
   }
 }
+// async function processEmailRow({
+//   emailRow,
+//   sheetName,
+//   sheetNameForPartnership,
+//   sheetNameForSBA,
+//   additionalContext,
+//   setErrorOccurred,
+//   setErrorContext,
+//   addToTotalEncoded,
+//   addTotalToBeApproved,
+//   addTotalInterestedLLM,
+//   autoAppend,
+//   descriptionExtraction,
+//   clientId,
+//   runCtx,
+// }) {
+//   console.log(colorize("Processing lead Email ...", "blue"));
+//   const spreadsheetId = env.SPREADSHEET_ID;
+
+//   try {
+//     const rowJson = await normalizeRow(emailRow);
+
+//     // ---------- Step 1: Address Present ----------
+//     const hasAddressInfo =
+//       rowJson.address !== "none" ||
+//       rowJson.city !== "none" ||
+//       rowJson.state !== "none" ||
+//       rowJson.zip !== "none" ||
+//       rowJson["company phone#"] !== "none";
+
+//     if (hasAddressInfo) {
+//       const usAddress = await isAddressUsBased({
+//         city: rowJson.city,
+//         state: rowJson.state,
+//         address: rowJson.address,
+//         zip: rowJson.zip,
+//         phone: rowJson["company phone#"],
+//         Signature: rowJson["Email Signature"],
+//         setErrorOccurred,
+//         setErrorContext,
+//       });
+
+//       if (!usAddress) return true;
+
+//       const { interested, type, isHot } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+
+//         // Update hot lead status dynamically
+//         if (isHot) {
+//           rowJson["Hot leads"] = "Hot lead";
+//           console.log("HOT LEAD DETECTED - Immediate follow-up required!");
+//         } else {
+//           rowJson["Hot leads"] = "";
+//           rowJson["For scheduling"] = "";
+//         }
+
+//         // Determine sheet name - hot leads go to dedicated sheet
+//         let sheetNameToUse;
+//         if (isHot) {
+//           sheetNameToUse = "Hot Leads";  // 👈 Dedicated hot leads sheet
+//         } else {
+//           const sheetNameMap = {
+//             partnership: sheetNameForPartnership,
+//             sba: sheetNameForSBA,
+//             offer: sheetNameForOffer,
+//           };
+//           sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+//         }
+
+//         console.log("-------- rowJson.details --------");
+//         console.log(rowJson.details);
+//         // Replace details (website) with business description if available
+//         if (rowJson.details && rowJson.details !== "none") {
+//           // Check if details looks like a valid URL
+//           const isValidUrl = /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(
+//             rowJson.details.trim()
+//           );
+
+//           if (isValidUrl) {
+//             try {
+//               const descResult = await extractBusinessDescription({
+//                 websiteUrl: rowJson.details,
+//                 setErrorOccurred,
+//                 setErrorContext,
+//                 descriptionExtraction,
+//               });
+
+//               if (
+//                 descResult &&
+//                 typeof descResult === "string" &&
+//                 descResult.trim()
+//               ) {
+//                 rowJson.details = descResult;
+//               } else {
+//                 rowJson.details = "none";
+//               }
+//             } catch (err) {
+//               console.warn(
+//                 "Failed to extract business description:",
+//                 err.message
+//               );
+//               if (setErrorContext) {
+//                 setErrorContext(
+//                   `Description extraction failed for ${rowJson.details}: ${err.message}`
+//                 );
+//               }
+//               rowJson.details = "none";
+//             }
+//           } else {
+//             // Skip extraction if details isn't a URL
+//             console.log(
+//               `Skipping description extraction — not a valid URL: ${rowJson.details}`
+//             );
+//           }
+//         }
+
+//         // FIX: Corrected parameter order - removed isHot from first position
+//         await encodeToSheet(
+//           spreadsheetId,
+//           sheetNameToUse,
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+//     // ---------- Step 2: Website Present ----------
+//     if (rowJson.details && rowJson.details !== "none") {
+//       if (additionalContext.Website && additionalContext.Website !== "none") {
+//         const usWebsite = await identifyBusinessCountry(
+//           additionalContext.Website
+//         );
+//         if (!usWebsite) return true;
+//       }
+
+//       const { interested, type, isHot } = await isActuallyInterested(
+//         rowJson["email reply"],
+//         addTotalInterestedLLM
+//       );
+
+//       if (interested) {
+//         emitProgress({ clientId, ctx: runCtx, show: false });
+//         const sheetNameForOffer = sheetName;
+//         await incrementFetchedInterestedLead();
+
+//         // Update hot lead status dynamically
+//         if (isHot) {
+//           rowJson["Hot leads"] = "Hot lead";
+//           console.log("HOT LEAD DETECTED - Immediate follow-up required!");
+//         } else {
+//           rowJson["Hot leads"] = "";
+//           rowJson["For scheduling"] = "";
+//         }
+
+//         // Determine sheet name - hot leads go to dedicated sheet
+//         let sheetNameToUse;
+//         if (isHot) {
+//           sheetNameToUse = "Hot Leads";  // Dedicated hot leads sheet
+//         } else {
+//           const sheetNameMap = {
+//             partnership: sheetNameForPartnership,
+//             sba: sheetNameForSBA,
+//             offer: sheetNameForOffer,
+//           };
+//           sheetNameToUse = sheetNameMap[type] || sheetNameForOffer;
+//         }
+
+//         try {
+//           const descResult = await extractBusinessDescription({
+//             websiteUrl: rowJson.details,
+//             setErrorOccurred,
+//             setErrorContext,
+//             descriptionExtraction,
+//           });
+
+//           if (
+//             descResult &&
+//             typeof descResult === "string" &&
+//             descResult.trim()
+//           ) {
+//             rowJson.details = descResult;
+//           } else {
+//             rowJson.details = "none";
+//           }
+//         } catch (err) {
+//           console.warn("Failed to extract business description:", err.message);
+//           rowJson.details = "none";
+//         }
+
+//         await encodeToSheet(
+//           spreadsheetId,
+//           sheetNameToUse,
+//           rowJson,
+//           additionalContext,
+//           addToTotalEncoded,
+//           setErrorOccurred,
+//           setErrorContext,
+//           addTotalToBeApproved,
+//           autoAppend,
+//           type
+//         );
+//       }
+
+//       return true;
+//     }
+
+//     // ---------- Step 3: No Address or Website ----------
+//     return true;
+//   } catch (err) {
+//     if (setErrorOccurred) setErrorOccurred(true);
+//     if (setErrorContext) setErrorContext(err.message);
+//     console.error("processEmailRow failed:", err);
+//     return true;
+//   }
+// }
 
 async function processEmailWithRetry({
   lead,

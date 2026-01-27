@@ -10,24 +10,12 @@ async function postAfterEncoding(args) {
   console.log("postAfterEncoding - ARGS");
   console.log(args);
 
-  console.log("env.POST_TO_CRM_MODE")
-  console.log(env.POST_TO_CRM_MODE)
-  // Check if CRM posting is enabled
-  const postToCrmMode = env.POST_TO_CRM_MODE === 'true' || env.POST_TO_CRM_MODE === true;
-  
-  if (!postToCrmMode) {
-    console.log(" CRM posting is DISABLED (POST_TO_CRM_MODE=false)");
-    console.log("Data received but NOT submitted to CRM");
-    return true; // Return true to not break the flow
-  }
+const phonenumberToCRM =
+  [rowJson["phone#from email"], rowJson["phone 1"], rowJson["company phone#"]]
+    .map(p => (p ? String(p).trim() : ""))
+    .find(p => p && p.toLowerCase() !== "none" && p !== "")
+    || "none";
 
-  console.log("✓ CRM posting is ENABLED - proceeding with submission");
-
-  const phonenumberToCRM =
-    [rowJson["phone#from email"], rowJson["phone 1"], rowJson["company phone#"]]
-      .map(p => (p ? String(p).trim() : ""))
-      .find(p => p && p.toLowerCase() !== "none" && p !== "")
-      || "none";
 
   // Build tags array dynamically
   const tags = [];

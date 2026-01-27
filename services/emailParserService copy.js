@@ -3,11 +3,9 @@ const axios = require("axios");
 const { colorize } = require("../utils/colorLogger");
 const { Firecrawl } = require("firecrawl");
 
-const API_KEYS = [
-  process.env.FIRECRAWL_API,
-  process.env.FIRECRAWL_API_1,
-  process.env.FIRECRAWL_API_2,
-].filter(Boolean); // Remove any undefined/null keys
+const firecrawl = new Firecrawl({
+  apiKey: env.FIRECRAWL_API,
+});
 
 function cleanEmailContent(rawEmail, maxWords = 100) {
   if (!rawEmail || typeof rawEmail !== "string") return "";
@@ -233,7 +231,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
 //   }
 // }
 
- async function extractReply({
+async function extractReply({
   emailContent,
   content_preview,
   setErrorOccurred,
@@ -242,15 +240,19 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
   const MAX_RETRIES = 2;
   const RETRY_DELAY_BASE = 2000;
 
-  const apiKey = process.env.OPEN_API_KEY;
-  if (!apiKey) {
-    console.error("No OpenAI API key found.");
+  const apiKeys = [
+    env.OPENROUTER_API_KEY,
+    env.OPENROUTER_API_KEY2,
+    env.OPENROUTER_API_KEY3,
+  ].filter(Boolean);
+
+  if (!apiKeys.length) {
+    console.error("No OpenRouter API keys found.");
     setErrorOccurred?.(true);
     return normalizeSchema({});
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
-
+  const model = env.OPEN_ROUTER_MODEL || "openai/gpt-5-chat";
   let cleanedContent = emailContent?.trim() || "";
 
   try {
@@ -258,7 +260,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
     const wordCount = cleanedContent.split(/\s+/).length;
     if (wordCount >= 20) {
       cleanedContent = cleanEmailContent(cleanedContent, 100);
-      console.log("CleanedContent:", cleanedContent);
+      console.log(colorize("CleanedContent", "cyan"), cleanedContent);
     } else {
       console.log(
         `Skipping cleanEmailContent — only ${wordCount} words detected.`
@@ -272,33 +274,96 @@ async function fetchWithTimeout(url, options, timeoutMs = 60000) {
 
     // --- 2. Build prompt ---
     const prompt = `
-You are an email reply extraction engine. Your job is to reliably extract the *latest human reply* at the top of an email thread.
-Follow these steps EXACTLY and output ONLY valid JSON:
+You are an email reply extraction engine. Your job is to reliably extract the *latest human reply* at the top of an email thread. 
+You must follow the steps EXACTLY. Do not skip steps. Do not infer or guess.
 
-1. Align using the content preview: "${content_preview}"
-2. Cut off at thread markers like "On", "From:", "Sent:", etc.
-3. Extract reply block and trim whitespace
-4. Remove quoted text starting with ">" or ">>"
-5. Extract phone numbers in any format; return comma-separated or ""
-6. Extract signature lines starting with "--", "Thanks,", "Regards," etc.; return "" if not found
-7. Short reply rule: replies 1–5 words like "Yes" are valid
-8. Output JSON ONLY in this structure:
-{
-  "reply": "cleaned_reply_without_signature",
-  "phone_numbers": "comma-separated numbers or empty string",
-  "signature": "signature_text_or_empty_string"
-}
-9. Do NOT return explanations, markdown, or anything else
+PROCESSING RULES (DO THESE IN ORDER):
+
+1. **Align using the content preview**
+   - Locate the FIRST occurrence of the exact content preview string (case-insensitive) inside the full email content.
+   - The reply ALWAYS begins at that location.
+   - Content preview to align with is:
+     "${content_preview}"
+   - If the content preview is not found, reply begins at the start of the email.
+
+2. **Find the cutoff point using thread markers**
+   Stop BEFORE the first line that starts with ANY of these (case-insensitive):
+      - "On "
+      - "From:"
+      - "Sent:"
+      - "To:"
+      - "Subject:"
+      - "wrote:"
+      - "Forwarded message"
+      - "Begin forwarded message"
+      - "-----Original Message-----"
+   If a marker appears ON THE SAME LINE as the content preview, cut immediately BEFORE the marker.
+
+3. **Extract the reply block**
+   - The reply is the text between:
+        (reply_start) → (first_marker_before_reply)
+   - Preserve exact text but trim leading and trailing whitespace.
+
+4. **Remove quoted text**
+   - Completely delete all lines beginning with:
+        ">"
+        ">>"
+        "> "
+        ">> "
+   - Do NOT include them in the reply.
+
+5. **Extract phone numbers**
+   - Detect phone numbers in any of these formats:
+        (xxx) xxx-xxxx
+        xxx-xxx-xxxx
+        xxx.xxx.xxxx
+        +1 xxx xxx xxxx
+        +xx xxx xxxx xxxx
+   - Return all unique matches as a comma-separated string.
+   - If no numbers exist, return "".
+
+6. **Extract signature**
+   A signature starts ONLY IF it is on its own separate line AND begins with one of:
+        -- 
+        – 
+        — 
+        Thanks,
+        Thank you,
+        Best,
+        Regards,
+        Sincerely,
+   OR the block contains job title, phone, email, company name, or website.
+   - The signature is everything from that signature line through the end of the reply block.
+   - If no valid signature is found, return "".
+
+7. **Short reply rule**
+   If the extracted reply text contains 1–5 words but is a valid acknowledgement 
+   (e.g., “Yes”, “Okay”, “Sounds good”, “Approved”, “Sure”), it IS a valid reply even if small.
+
+8. **Final formatting**
+   Output ONLY valid JSON in this exact structure:
+   {
+     "reply": "cleaned_reply_without_signature",
+     "phone_numbers": "comma-separated numbers or empty string",
+     "signature": "signature_text_or_empty_string"
+   }
+
+9. **Do NOT return explanations, commentary, reasoning, markdown, or anything else besides the JSON.**
 `;
 
-    // --- 3. Retry loop ---
+    // --- 3. Loop for retries ---
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      console.log(`Using OpenAI GPT-4.1, Attempt #${attempt + 1}`);
-
+      const keyIndex = attempt % apiKeys.length;
       const headers = {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKeys[keyIndex]}`,
         "Content-Type": "application/json",
       };
+
+      console.log(
+        `Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${
+          attempt + 1
+        }`
+      );
 
       const body = JSON.stringify({
         model,
@@ -311,29 +376,45 @@ Follow these steps EXACTLY and output ONLY valid JSON:
 
       let resp;
       try {
-        resp = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers,
-          body,
-        });
+        resp = await fetchWithTimeout(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers,
+            body,
+          },
+          60000
+        );
       } catch (err) {
         console.error("Network or timeout error:", err.message);
         setErrorOccurred?.(true);
         setErrorContext?.(err.message);
+        continue; // Try next attempt
+      }
+
+      console.log("OpenRouter response status:", resp.status);
+
+      // --- 4. Handle rate limit (429) ---
+      if (resp.status === 429 && attempt < apiKeys.length - 1) {
+        const delay = RETRY_DELAY_BASE * (attempt + 1);
+        console.warn(`Rate limited. Retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
 
       if (!resp.ok) {
-        console.error("OpenAI Error:", resp.status);
+        console.error("OpenRouter Error:", resp.status);
         setErrorOccurred?.(true);
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_BASE * (attempt + 1)));
         continue;
       }
 
       const json = await resp.json();
-      let replyRaw = json.choices?.[0]?.message?.content?.trim() || "";
+      let replyRaw =
+        json.choices?.[0]?.message?.content?.trim() ||
+        json.choices?.[0]?.text?.trim() ||
+        "";
 
-      // --- 4. Clean markdown JSON wrappers ---
+      // --- 5. Clean markdown JSON wrappers ---
       if (/^```/m.test(replyRaw)) {
         replyRaw = replyRaw
           .replace(/^```(?:json)?/i, "")
@@ -341,31 +422,45 @@ Follow these steps EXACTLY and output ONLY valid JSON:
           .trim();
       }
 
-      // --- 5. Parse JSON safely ---
+      // --- 6. Parse JSON safely ---
       let parsedReply;
       try {
         parsedReply = JSON.parse(replyRaw);
       } catch {
-        // fallback parsing
         const phoneMatches =
-          replyRaw.match(/\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) || [];
+          replyRaw.match(
+            /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
+          ) || [];
         const phoneText = phoneMatches.join(", ");
-        const sigMatch = replyRaw.match(/(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i);
+        const sigMatch = replyRaw.match(
+          /(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i
+        );
         const signature = sigMatch ? sigMatch[0].trim() : "";
-        const reply = sigMatch ? replyRaw.replace(sigMatch[0], "").trim() : replyRaw.trim();
-        parsedReply = { reply, phone_numbers: phoneText, signature };
+        const reply = sigMatch
+          ? replyRaw.replace(sigMatch[0], "").trim()
+          : replyRaw.trim();
+        parsedReply = { reply, phone_number: phoneText, signature };
       }
 
-      // --- 6. Normalize result ---
+      // --- 7. Normalize result ---
       const reply = parsedReply.reply?.trim() || "";
-      const phoneNumbers = Array.isArray(parsedReply.phone_numbers)
-        ? parsedReply.phone_numbers.join(", ")
-        : parsedReply.phone_numbers?.trim() || "";
+      const phoneNumbers = Array.isArray(parsedReply.phone_number)
+        ? parsedReply.phone_number.join(", ")
+        : parsedReply.phone_number?.trim() || "";
       const signature = parsedReply.signature?.trim() || "";
 
-      if (reply.length > 0 || (cleanedContent.length <= 100 && /\w/.test(cleanedContent))) {
+      // --- 8. Prevent false "empty" output ---
+      const isValidShortReply =
+        reply.length > 0 ||
+        (cleanedContent.length <= 100 && /\w/.test(cleanedContent)); // e.g. "Yes please!"
+
+      if (isValidShortReply) {
         setErrorOccurred?.(false);
-        return normalizeSchema({ reply: reply || cleanedContent, phone_numbers: phoneNumbers, signature });
+        return normalizeSchema({
+          reply: reply || cleanedContent,
+          phone_numbers: phoneNumbers,
+          signature,
+        });
       }
 
       if (attempt < MAX_RETRIES) {
@@ -375,269 +470,20 @@ Follow these steps EXACTLY and output ONLY valid JSON:
       }
     }
 
-    // --- 7. Final fallback ---
+    // --- 9. Final fallback ---
     console.warn("All attempts failed. Returning minimal content fallback.");
-    return normalizeSchema({ reply: cleanedContent, phone_numbers: "", signature: "" });
+    return normalizeSchema({
+      reply: cleanedContent, // fallback ensures “Hello, Yes please!” isn’t lost
+      phone_numbers: "",
+      signature: "",
+    });
   } catch (err) {
-    console.error("Error calling OpenAI:", err.message);
+    console.error("Error calling OpenRouter:", err.message);
     setErrorOccurred?.(true);
     setErrorContext?.(err.message);
     return normalizeSchema({});
   }
 }
-// async function extractReply({
-//   emailContent,
-//   content_preview,
-//   setErrorOccurred,
-//   setErrorContext,
-// }) {
-//   const MAX_RETRIES = 2;
-//   const RETRY_DELAY_BASE = 2000;
-
-//   const apiKeys = [
-//     env.OPENROUTER_API_KEY,
-//     env.OPENROUTER_API_KEY2,
-//     env.OPENROUTER_API_KEY3,
-//   ].filter(Boolean);
-
-//   if (!apiKeys.length) {
-//     console.error("No OpenRouter API keys found.");
-//     setErrorOccurred?.(true);
-//     return normalizeSchema({});
-//   }
-
-//   const model = env.OPEN_ROUTER_MODEL || "openai/gpt-5-chat";
-//   let cleanedContent = emailContent?.trim() || "";
-
-//   try {
-//     // --- 1. Clean content ---
-//     const wordCount = cleanedContent.split(/\s+/).length;
-//     if (wordCount >= 20) {
-//       cleanedContent = cleanEmailContent(cleanedContent, 100);
-//       console.log(colorize("CleanedContent", "cyan"), cleanedContent);
-//     } else {
-//       console.log(
-//         `Skipping cleanEmailContent — only ${wordCount} words detected.`
-//       );
-//     }
-
-//     if (!cleanedContent) {
-//       setErrorOccurred?.(false);
-//       return normalizeSchema({});
-//     }
-
-//     // --- 2. Build prompt ---
-//     const prompt = `
-// You are an email reply extraction engine. Your job is to reliably extract the *latest human reply* at the top of an email thread. 
-// You must follow the steps EXACTLY. Do not skip steps. Do not infer or guess.
-
-// PROCESSING RULES (DO THESE IN ORDER):
-
-// 1. **Align using the content preview**
-//    - Locate the FIRST occurrence of the exact content preview string (case-insensitive) inside the full email content.
-//    - The reply ALWAYS begins at that location.
-//    - Content preview to align with is:
-//      "${content_preview}"
-//    - If the content preview is not found, reply begins at the start of the email.
-
-// 2. **Find the cutoff point using thread markers**
-//    Stop BEFORE the first line that starts with ANY of these (case-insensitive):
-//       - "On "
-//       - "From:"
-//       - "Sent:"
-//       - "To:"
-//       - "Subject:"
-//       - "wrote:"
-//       - "Forwarded message"
-//       - "Begin forwarded message"
-//       - "-----Original Message-----"
-//    If a marker appears ON THE SAME LINE as the content preview, cut immediately BEFORE the marker.
-
-// 3. **Extract the reply block**
-//    - The reply is the text between:
-//         (reply_start) → (first_marker_before_reply)
-//    - Preserve exact text but trim leading and trailing whitespace.
-
-// 4. **Remove quoted text**
-//    - Completely delete all lines beginning with:
-//         ">"
-//         ">>"
-//         "> "
-//         ">> "
-//    - Do NOT include them in the reply.
-
-// 5. **Extract phone numbers**
-//    - Detect phone numbers in any of these formats:
-//         (xxx) xxx-xxxx
-//         xxx-xxx-xxxx
-//         xxx.xxx.xxxx
-//         +1 xxx xxx xxxx
-//         +xx xxx xxxx xxxx
-//    - Return all unique matches as a comma-separated string.
-//    - If no numbers exist, return "".
-
-// 6. **Extract signature**
-//    A signature starts ONLY IF it is on its own separate line AND begins with one of:
-//         -- 
-//         – 
-//         — 
-//         Thanks,
-//         Thank you,
-//         Best,
-//         Regards,
-//         Sincerely,
-//    OR the block contains job title, phone, email, company name, or website.
-//    - The signature is everything from that signature line through the end of the reply block.
-//    - If no valid signature is found, return "".
-
-// 7. **Short reply rule**
-//    If the extracted reply text contains 1–5 words but is a valid acknowledgement 
-//    (e.g., “Yes”, “Okay”, “Sounds good”, “Approved”, “Sure”), it IS a valid reply even if small.
-
-// 8. **Final formatting**
-//    Output ONLY valid JSON in this exact structure:
-//    {
-//      "reply": "cleaned_reply_without_signature",
-//      "phone_numbers": "comma-separated numbers or empty string",
-//      "signature": "signature_text_or_empty_string"
-//    }
-
-// 9. **Do NOT return explanations, commentary, reasoning, markdown, or anything else besides the JSON.**
-// `;
-
-//     // --- 3. Loop for retries ---
-//     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-//       const keyIndex = attempt % apiKeys.length;
-//       const headers = {
-//         Authorization: `Bearer ${apiKeys[keyIndex]}`,
-//         "Content-Type": "application/json",
-//       };
-
-//       console.log(
-//         `Using OpenRouter model: ${model} (API Key #${keyIndex + 1}) Attempt #${
-//           attempt + 1
-//         }`
-//       );
-
-//       const body = JSON.stringify({
-//         model,
-//         messages: [
-//           { role: "system", content: prompt },
-//           { role: "user", content: cleanedContent },
-//         ],
-//         temperature: 0,
-//       });
-
-//       let resp;
-//       try {
-//         resp = await fetchWithTimeout(
-//           "https://openrouter.ai/api/v1/chat/completions",
-//           {
-//             method: "POST",
-//             headers,
-//             body,
-//           },
-//           60000
-//         );
-//       } catch (err) {
-//         console.error("Network or timeout error:", err.message);
-//         setErrorOccurred?.(true);
-//         setErrorContext?.(err.message);
-//         continue; // Try next attempt
-//       }
-
-//       console.log("OpenRouter response status:", resp.status);
-
-//       // --- 4. Handle rate limit (429) ---
-//       if (resp.status === 429 && attempt < apiKeys.length - 1) {
-//         const delay = RETRY_DELAY_BASE * (attempt + 1);
-//         console.warn(`Rate limited. Retrying in ${delay / 1000}s...`);
-//         await new Promise((r) => setTimeout(r, delay));
-//         continue;
-//       }
-
-//       if (!resp.ok) {
-//         console.error("OpenRouter Error:", resp.status);
-//         setErrorOccurred?.(true);
-//         continue;
-//       }
-
-//       const json = await resp.json();
-//       let replyRaw =
-//         json.choices?.[0]?.message?.content?.trim() ||
-//         json.choices?.[0]?.text?.trim() ||
-//         "";
-
-//       // --- 5. Clean markdown JSON wrappers ---
-//       if (/^```/m.test(replyRaw)) {
-//         replyRaw = replyRaw
-//           .replace(/^```(?:json)?/i, "")
-//           .replace(/```$/, "")
-//           .trim();
-//       }
-
-//       // --- 6. Parse JSON safely ---
-//       let parsedReply;
-//       try {
-//         parsedReply = JSON.parse(replyRaw);
-//       } catch {
-//         const phoneMatches =
-//           replyRaw.match(
-//             /\+?\d{1,2}?\s*\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g
-//           ) || [];
-//         const phoneText = phoneMatches.join(", ");
-//         const sigMatch = replyRaw.match(
-//           /(--|–|—|Thanks,|Thank you,|Best,|Regards,|Sincerely,)[\s\S]*$/i
-//         );
-//         const signature = sigMatch ? sigMatch[0].trim() : "";
-//         const reply = sigMatch
-//           ? replyRaw.replace(sigMatch[0], "").trim()
-//           : replyRaw.trim();
-//         parsedReply = { reply, phone_number: phoneText, signature };
-//       }
-
-//       // --- 7. Normalize result ---
-//       const reply = parsedReply.reply?.trim() || "";
-//       const phoneNumbers = Array.isArray(parsedReply.phone_number)
-//         ? parsedReply.phone_number.join(", ")
-//         : parsedReply.phone_number?.trim() || "";
-//       const signature = parsedReply.signature?.trim() || "";
-
-//       // --- 8. Prevent false "empty" output ---
-//       const isValidShortReply =
-//         reply.length > 0 ||
-//         (cleanedContent.length <= 100 && /\w/.test(cleanedContent)); // e.g. "Yes please!"
-
-//       if (isValidShortReply) {
-//         setErrorOccurred?.(false);
-//         return normalizeSchema({
-//           reply: reply || cleanedContent,
-//           phone_numbers: phoneNumbers,
-//           signature,
-//         });
-//       }
-
-//       if (attempt < MAX_RETRIES) {
-//         const delay = RETRY_DELAY_BASE + attempt * 1000;
-//         console.warn(`Empty or invalid reply. Retrying in ${delay / 1000}s...`);
-//         await new Promise((r) => setTimeout(r, delay));
-//       }
-//     }
-
-//     // --- 9. Final fallback ---
-//     console.warn("All attempts failed. Returning minimal content fallback.");
-//     return normalizeSchema({
-//       reply: cleanedContent, // fallback ensures “Hello, Yes please!” isn’t lost
-//       phone_numbers: "",
-//       signature: "",
-//     });
-//   } catch (err) {
-//     console.error("Error calling OpenRouter:", err.message);
-//     setErrorOccurred?.(true);
-//     setErrorContext?.(err.message);
-//     return normalizeSchema({});
-//   }
-// }
 async function extractReplyEmail({
   emailContent,
   content_preview,
@@ -913,57 +759,26 @@ async function getWebsiteData(url) {
     console.error("No URL provided.");
     return null;
   }
+  try {
+    const response = await firecrawl.scrape(url, {
+      formats: ["markdown"],
+    });
 
-  if (API_KEYS.length === 0) {
-    console.error("No Firecrawl API keys configured.");
+    if (!response) {
+      console.warn("No response received from Firecrawl.");
+      return null;
+    }
+
+    const description =
+      response.metadata?.description ||
+      response.metadata?.ogDescription ||
+      "none";
+    return description;
+  } catch (error) {
+    console.error("Firecrawl scrape error:", error.message || error);
     return null;
   }
-
-  let lastError = null;
-
-  // Try each API key in sequence
-  for (let i = 0; i < API_KEYS.length; i++) {
-    try {
-      console.log(`Attempting with API key ${i + 1}/${API_KEYS.length}`);
-      
-      const firecrawl = new Firecrawl({
-        apiKey: API_KEYS[i],
-      });
-
-      const response = await firecrawl.scrape(url, {
-        formats: ["markdown"],
-      });
-
-      if (!response) {
-        console.warn(`No response from API key ${i + 1}, trying next...`);
-        continue;
-      }
-
-      const description =
-        response.metadata?.description ||
-        response.metadata?.ogDescription ||
-        null;
-
-      console.log(`Success with API key ${i + 1}`);
-      return description;
-
-    } catch (error) {
-      lastError = error;
-      console.warn(`API key ${i + 1} failed: ${error.message || error}`);
-      
-      // If this isn't the last key, continue to next one
-      if (i < API_KEYS.length - 1) {
-        console.log(`Trying next API key...`);
-        continue;
-      }
-    }
-  }
-
-  // All API keys failed
-  console.error("All Firecrawl API keys failed:", lastError?.message || lastError);
-  return null;
 }
-
 
 async function extractBusinessDescription({
   websiteUrl,
